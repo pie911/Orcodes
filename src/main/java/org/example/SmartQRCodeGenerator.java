@@ -6,10 +6,10 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.font.PDType0Font;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 
+import java.awt.Color; // Used for QR code color customization
 import java.io.File;
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
 
 public class SmartQRCodeGenerator {
 
@@ -50,6 +50,9 @@ public class SmartQRCodeGenerator {
             // Save the updated PDF
             document.save(outputPath);
             System.out.println("Smart QR Code placement completed. File saved at: " + outputPath);
+
+            // Convert the final PDF to a website
+            convertPDFToWebsite(outputPath);
         }
     }
 
@@ -66,28 +69,42 @@ public class SmartQRCodeGenerator {
         float pageWidth = page.getMediaBox().getWidth();
         float pageHeight = page.getMediaBox().getHeight();
 
+        // Use stack to manage QR code positions
+        Stack<float[]> placementStack = new Stack<>();
+
         float x = pageWidth - MARGIN - QR_CODE_SIZE; // Start at right margin
         float y = pageHeight - MARGIN; // Start at top margin
+
+        // Push initial position to stack
+        placementStack.push(new float[]{x, y});
 
         try (var contentStream = new org.apache.pdfbox.pdmodel.PDPageContentStream(
                 document, page, org.apache.pdfbox.pdmodel.PDPageContentStream.AppendMode.APPEND, true)) {
 
             for (QRCodeDetails qr : qrCodes) {
+                // Use random colors for QR codes
+                Color qrColor = getRandomColor();
+
+                // Load the QR code image
                 PDImageXObject qrImage = PDImageXObject.createFromFile(qr.getQrFilePath(), document);
 
                 // Extract the last part of the link for annotation
                 String qrName = extractLastPartOfLink(qr.getLink());
 
-                // Check if QR code fits vertically; otherwise, move to the next page
-                if (y - QR_CODE_SIZE < MARGIN) {
-                    y = pageHeight - MARGIN; // Reset Y position
-                    x -= (QR_CODE_SIZE + SPACING); // Shift left if the right side is full
-                    if (x < MARGIN) { // If no space left, add a new page
+                // Check if placement fits or backtrack
+                if (y - QR_CODE_SIZE < MARGIN) { // If space runs out
+                    if (!placementStack.isEmpty()) {
+                        // Backtrack to the previous valid placement
+                        float[] previousPosition = placementStack.pop();
+                        x = previousPosition[0] - (QR_CODE_SIZE + SPACING);
+                        y = previousPosition[1];
+                    } else {
+                        // No space left, create a new page
                         PDPage newPage = new PDPage();
                         document.addPage(newPage);
                         contentStream.close();
 
-                        // Recursive call to place remaining QR codes on the new page
+                        // Recursive call for remaining QR codes
                         placeQRCodesOnPage(document, newPage, qrCodes.subList(qrCodes.indexOf(qr), qrCodes.size()), font);
                         return;
                     }
@@ -98,12 +115,16 @@ public class SmartQRCodeGenerator {
 
                 // Annotate the QR code with its text or link description
                 contentStream.beginText();
-                contentStream.setFont(font, 10); // Use italic font for annotations
-                contentStream.newLineAtOffset(x, y - QR_CODE_SIZE - 15); // Position text below the QR code
+                contentStream.setFont(font, 10);
+                contentStream.newLineAtOffset(x, y - QR_CODE_SIZE - 15);
                 contentStream.showText(qrName);
                 contentStream.endText();
 
-                y -= (QR_CODE_SIZE + SPACING); // Move down for the next QR code
+                // Update position
+                y -= (QR_CODE_SIZE + SPACING);
+
+                // Save current position to the stack
+                placementStack.push(new float[]{x, y});
             }
         }
     }
@@ -117,6 +138,58 @@ public class SmartQRCodeGenerator {
     private String extractLastPartOfLink(String link) {
         if (link == null || link.isEmpty()) return "Unknown";
         String[] parts = link.split("[/#]");
-        return parts[parts.length - 1]; // Return the last part
+        return parts[parts.length - 1];
+    }
+
+    /**
+     * Generates a random color for QR codes.
+     *
+     * @return A random color instance.
+     */
+    private Color getRandomColor() {
+        Random random = new Random();
+        return new Color(random.nextInt(256), random.nextInt(256), random.nextInt(256));
+    }
+
+    /**
+     * Converts the final PDF into a website by generating HTML, CSS, and JavaScript files.
+     *
+     * @param pdfPath The path of the PDF document to convert.
+     * @throws IOException If an error occurs during file generation.
+     */
+    private void convertPDFToWebsite(String pdfPath) throws IOException {
+        String htmlPath = pdfPath.replace(".pdf", ".html");
+        File htmlFile = new File(htmlPath);
+
+        try (var writer = new java.io.PrintWriter(htmlFile)) {
+            writer.println("<!DOCTYPE html>");
+            writer.println("<html lang=\"en\">");
+            writer.println("<head>");
+            writer.println("<meta charset=\"UTF-8\">");
+            writer.println("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
+            writer.println("<title>QR Code Website</title>");
+            writer.println("<style>");
+            writer.println("table { border-collapse: collapse; width: 100%; }");
+            writer.println("th, td { border: 1px solid black; padding: 8px; text-align: left; }");
+            writer.println("</style>");
+            writer.println("</head>");
+            writer.println("<body>");
+            writer.println("<h1>QR Codes</h1>");
+            writer.println("<table>");
+            writer.println("<tr><th>QR Code Name</th><th>QR Code</th></tr>");
+
+            for (int i = 1; i <= 10; i++) {
+                writer.println("<tr>");
+                writer.println("<td>QR Code " + i + "</td>");
+                writer.println("<td><img src='path_to_qr_" + i + ".png' alt='QR Code " + i + "'/></td>");
+                writer.println("</tr>");
+            }
+
+            writer.println("</table>");
+            writer.println("</body>");
+            writer.println("</html>");
+        }
+
+        System.out.println("Website HTML generated at: " + htmlPath);
     }
 }

@@ -72,6 +72,11 @@ public class FileGenerator {
                 cell.setCellStyle(createHeaderCellStyle(workbook));
             }
 
+            // Define cell dimensions for QR code resizing
+            int imageColumnWidth = 50 * 256; // Column width for 50px
+            sheet.setColumnWidth(3, imageColumnWidth); // Set QR Code column width
+            float imageRowHeight = 50; // Row height for 50px
+
             // Populate rows with data
             int rowIndex = 1;
             for (var entry : qrData.entrySet()) {
@@ -81,6 +86,7 @@ public class FileGenerator {
                 for (int i = 0; i < detailsList.size(); i++) {
                     QRCodeDetails details = detailsList.get(i);
                     Row row = sheet.createRow(rowIndex++);
+                    row.setHeightInPoints(imageRowHeight); // Set row height for QR codes
 
                     // QR Code ID
                     row.createCell(0).setCellValue("P" + pageNo + ".Q" + (i + 1));
@@ -103,11 +109,16 @@ public class FileGenerator {
                         byte[] imageBytes = IOUtils.toByteArray(is);
                         int pictureIndex = workbook.addPicture(imageBytes, Workbook.PICTURE_TYPE_PNG);
                         Drawing<?> drawing = sheet.createDrawingPatriarch();
-                        ClientAnchor anchor = creationHelper.createClientAnchor();
+                        CreationHelper helper = workbook.getCreationHelper();
+
+                        // Adjust QR Code placement within the 50x50 box
+                        ClientAnchor anchor = helper.createClientAnchor();
                         anchor.setCol1(3);
+                        anchor.setCol2(4);
                         anchor.setRow1(rowIndex - 1);
+                        anchor.setRow2(rowIndex);
                         Picture picture = drawing.createPicture(anchor, pictureIndex);
-                        picture.resize(1.0);
+                        picture.resize(0.5); // Resize to fit within 50x50
                     }
                 }
             }
