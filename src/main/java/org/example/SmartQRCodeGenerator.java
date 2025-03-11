@@ -28,6 +28,7 @@ public class SmartQRCodeGenerator {
     public void placeSmartQRCodes(String pdfPath, HashMap<Integer, List<QRCodeDetails>> qrData, String outputPath) throws IOException {
         try (PDDocument document = Loader.loadPDF(new File(pdfPath))) {
 
+            // Load italic font
             PDType0Font italicFont = PDType0Font.load(document, new File("src/main/resources/fonts/timesi.ttf"));
 
             for (var entry : qrData.entrySet()) {
@@ -65,7 +66,8 @@ public class SmartQRCodeGenerator {
         float pageWidth = page.getMediaBox().getWidth();
         float pageHeight = page.getMediaBox().getHeight();
 
-        float x = MARGIN, y = pageHeight - MARGIN; // Initial position for QR code placement
+        float x = pageWidth - MARGIN - QR_CODE_SIZE; // Start at right margin
+        float y = pageHeight - MARGIN; // Start at top margin
 
         try (var contentStream = new org.apache.pdfbox.pdmodel.PDPageContentStream(
                 document, page, org.apache.pdfbox.pdmodel.PDPageContentStream.AppendMode.APPEND, true)) {
@@ -73,21 +75,22 @@ public class SmartQRCodeGenerator {
             for (QRCodeDetails qr : qrCodes) {
                 PDImageXObject qrImage = PDImageXObject.createFromFile(qr.getQrFilePath(), document);
 
-                // Check if QR code fits horizontally and vertically; otherwise, reposition
-                if (x + QR_CODE_SIZE > pageWidth - MARGIN) {
-                    x = MARGIN; // Reset to left margin
-                    y -= (QR_CODE_SIZE + SPACING); // Move down one row
-                }
+                // Extract the last part of the link for annotation
+                String qrName = extractLastPartOfLink(qr.getLink());
 
-                if (y - QR_CODE_SIZE < MARGIN) { // Not enough space on the current page
+                // Check if QR code fits vertically; otherwise, move to the next page
+                if (y - QR_CODE_SIZE < MARGIN) {
                     y = pageHeight - MARGIN; // Reset Y position
-                    PDPage newPage = new PDPage();
-                    document.addPage(newPage);
-                    contentStream.close();
+                    x -= (QR_CODE_SIZE + SPACING); // Shift left if the right side is full
+                    if (x < MARGIN) { // If no space left, add a new page
+                        PDPage newPage = new PDPage();
+                        document.addPage(newPage);
+                        contentStream.close();
 
-                    // Recursive call to place remaining QR codes on the new page
-                    placeQRCodesOnPage(document, newPage, qrCodes.subList(qrCodes.indexOf(qr), qrCodes.size()), font);
-                    return;
+                        // Recursive call to place remaining QR codes on the new page
+                        placeQRCodesOnPage(document, newPage, qrCodes.subList(qrCodes.indexOf(qr), qrCodes.size()), font);
+                        return;
+                    }
                 }
 
                 // Draw the QR code image
@@ -96,32 +99,24 @@ public class SmartQRCodeGenerator {
                 // Annotate the QR code with its text or link description
                 contentStream.beginText();
                 contentStream.setFont(font, 10); // Use italic font for annotations
-                contentStream.newLineAtOffset(x, y - QR_CODE_SIZE - 15); // Adjust text placement below QR code
-                contentStream.showText(qr.getText());
+                contentStream.newLineAtOffset(x, y - QR_CODE_SIZE - 15); // Position text below the QR code
+                contentStream.showText(qrName);
                 contentStream.endText();
 
-                x += (QR_CODE_SIZE + SPACING); // Move to the next column
+                y -= (QR_CODE_SIZE + SPACING); // Move down for the next QR code
             }
         }
     }
 
     /**
-     * Simulated reward mechanism for evaluating QR code placement based on spacing and alignment.
+     * Extracts the last part of a URL or string (e.g., after the last "/" or "#").
      *
-     * @param x          The X-coordinate of placement.
-     * @param y          The Y-coordinate of placement.
-     * @param pageWidth  Page width for boundary checks.
-     * @param pageHeight Page height for boundary checks.
-     * @return Reward value (higher is better placement).
+     * @param link The full URL or string.
+     * @return The last part of the link.
      */
-    private double evaluatePlacementReward(float x, float y, float pageWidth, float pageHeight) {
-        boolean withinBounds = (x + QR_CODE_SIZE <= pageWidth - MARGIN) && (y - QR_CODE_SIZE >= MARGIN);
-        double reward = withinBounds ? 1.0 : -1.0; // Penalize out-of-bounds placements
-
-        // Bonus rewards for centering and avoiding edges
-        reward += (x > MARGIN && x < pageWidth / 2) ? 0.5 : 0.0;
-        reward += (y < pageHeight - MARGIN && y > pageHeight / 2) ? 0.5 : 0.0;
-
-        return reward;
+    private String extractLastPartOfLink(String link) {
+        if (link == null || link.isEmpty()) return "Unknown";
+        String[] parts = link.split("[/#]");
+        return parts[parts.length - 1]; // Return the last part
     }
 }
