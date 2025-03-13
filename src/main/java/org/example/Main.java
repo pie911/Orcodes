@@ -10,42 +10,40 @@ public class Main {
     public static void main(String[] args) {
         ProgressTracker tracker = new ProgressTracker();
 
-        try (Scanner scanner = new Scanner(System.in)) { // Automatically close Scanner resource
-            // Step 1: Welcome Message and User Inputs
+        try (Scanner scanner = new Scanner(System.in)) {
             System.out.println("Welcome to the Dynamic QR Code Generator!");
 
-            // Base Path for Directory
-            String basePath = getInputWithValidation(scanner, "Enter Base Path (e.g., D:\\ or C:\\Users\\YourName\\Documents\\): ",
+            // Get validated inputs from the user
+            String basePath = getInputWithValidation(scanner,
+                    "Enter Base Path (e.g., D:\\ or C:\\Users\\YourName\\Documents\\): ",
                     Utils::validateDirectoryPath, "Invalid base path. Please try again: ");
 
-            // User Name
-            String userName = getInputWithValidation(scanner, "Enter UserName: ",
+            String userName = getInputWithValidation(scanner,
+                    "Enter UserName: ",
                     input -> !input.trim().isEmpty(), "UserName cannot be empty. Please enter a valid UserName: ");
 
-            // Document Path
-            String documentPath = getInputWithValidation(scanner, "Enter Document Path (PDF file): ",
+            String documentPath = getInputWithValidation(scanner,
+                    "Enter Document Path (PDF file): ",
                     Utils::validateFilePath, "Invalid document path. Please provide a valid PDF file: ");
 
-            // Output File Name
-            String fileName = getInputWithValidation(scanner, "Enter File Name (Without Extension): ",
+            String fileName = getInputWithValidation(scanner,
+                    "Enter File Name (Without Extension): ",
                     input -> !input.trim().isEmpty(), "File Name cannot be empty. Please enter a valid File Name: ");
 
-            // QR Code Customization
-            int qrWidth = 250; // Default size
-            int qrHeight = 250; // Default size
+            // Optionally customize QR code size
+            int qrWidth = 250;
+            int qrHeight = 250;
             System.out.print("Do you want to customize the QR code size? (yes/no): ");
             if (scanner.nextLine().trim().equalsIgnoreCase("yes")) {
-                System.out.print("Enter QR Code Width (in pixels): ");
-                qrWidth = getValidNumericInput(scanner);
-                System.out.print("Enter QR Code Height (in pixels): ");
-                qrHeight = getValidNumericInput(scanner);
+                qrWidth = getValidNumericInput(scanner, "Enter QR Code Width (in pixels): ");
+                qrHeight = getValidNumericInput(scanner, "Enter QR Code Height (in pixels): ");
             }
 
-            // Initialize Progress Tracker
-            tracker.startTracking(7); // Updated to 7 steps to include smart QR placement
+            // Initialize progress tracking
+            tracker.startTracking(7); // Define 7 steps
             System.out.println("\nProcess started with 7 steps.\n");
 
-            // Step 2: Directory Setup
+            // Step 1: Create directories
             tracker.updateProgress("Creating project directories...");
             FolderManager folderManager = new FolderManager();
             String userDir;
@@ -54,93 +52,101 @@ public class Main {
                 userDir = folderManager.createUserDirectory(basePath, userName);
                 docDir = folderManager.createDocumentDirectory(userDir, fileName);
             } catch (IOException e) {
-                throw new IOException("Failed to create directories: " + e.getMessage());
+                tracker.logError("Failed to create directories: " + e.getMessage());
+                return;
             }
 
-            // Step 3: Analyze Document (Extract Links)
-            tracker.updateProgress("Analyzing document for visible and embedded links...");
+            // Step 2: Analyze the document for links
+            tracker.updateProgress("Analyzing document for links...");
             DocumentAnalyzer analyzer = new DocumentAnalyzer();
             HashMap<Integer, List<String>> pageLinks;
             try {
-                pageLinks = analyzer.analyzeDocument(documentPath);
+                pageLinks = analyzer.analyzeDocument(documentPath, docDir); // Updated for compatibility
             } catch (IOException e) {
-                throw new IOException("Error during document analysis: " + e.getMessage());
+                tracker.logError("Error during document analysis: " + e.getMessage());
+                return;
             }
 
             if (pageLinks.isEmpty()) {
-                tracker.logMessage("No links found in the document. Process completed successfully.");
+                tracker.logMessage("No links found. Process completed.");
                 tracker.completeTracking();
                 return;
             }
 
-            // Step 4: Generate QR Codes
+            // Step 3: Categorize links
+            tracker.updateProgress("Categorizing links...");
+            HashMap<String, List<String>> categorizedLinks = LinkExtractor.extractAndCategorizeLinks(
+                    String.join(" ", pageLinks.values().stream().flatMap(List::stream).toList())
+            );
+            System.out.println("Categorized Links: " + categorizedLinks);
+
+            // Step 4: Generate QR codes
             tracker.updateProgress("Generating QR codes...");
             QRCodeGenerator qrGenerator = new QRCodeGenerator();
             HashMap<Integer, List<QRCodeDetails>> qrData;
             try {
                 qrData = qrGenerator.generateQRCodes(pageLinks, docDir, qrWidth, qrHeight);
             } catch (IOException e) {
-                throw new IOException("Failed to generate QR codes: " + e.getMessage());
+                tracker.logError("Failed to generate QR codes: " + e.getMessage());
+                return;
             }
 
-            // Step 5: Generate Supplementary Files
+            // Step 5: Generate supplementary files
             tracker.updateProgress("Creating supplementary files...");
             FileGenerator fileGenerator = new FileGenerator();
             try {
-                fileGenerator.createQrCodesJson(qrData, docDir);
+                fileGenerator.createQrCodesJson(qrData, docDir); // Ensured compatibility
                 fileGenerator.createQrTableXlsx(qrData, docDir);
                 fileGenerator.createQrTablePdf(qrData, docDir);
             } catch (IOException e) {
-                throw new IOException("Failed to generate supplementary files: " + e.getMessage());
+                tracker.logError("Failed to generate supplementary files: " + e.getMessage());
+                return;
             }
 
-            // Step 6: Smart QR Code Placement into PDF
-            tracker.updateProgress("Dynamically embedding QR codes into the PDF using smart placement...");
+            // Step 6: Embed QR codes into PDF
+            tracker.updateProgress("Embedding QR codes into PDF...");
+            PDFEditor pdfEditor = new PDFEditor(); // Ensure PDFEditor implementation exists
+            try {
+                pdfEditor.embedQRCodes(documentPath, qrData, userDir + "/" + fileName + "_Final", tracker);
+                tracker.logMessage("QR codes successfully embedded into the PDF.");
+            } catch (IOException e) {
+                tracker.logError("Failed to embed QR codes: " + e.getMessage());
+                return;
+            }
+
+            // Step 7: Generate responsive website
+            tracker.updateProgress("Generating responsive website...");
             SmartQRCodeGenerator smartQrGenerator = new SmartQRCodeGenerator();
             try {
-                smartQrGenerator.placeSmartQRCodes(documentPath, qrData, userDir + "/" + fileName + "_Final.pdf");
+                smartQrGenerator.convertPDFToWebsite(documentPath, qrData, userDir + "/Website");
+                tracker.logMessage("Responsive website generated successfully.");
             } catch (IOException e) {
-                throw new IOException("Failed to embed QR codes dynamically into the PDF: " + e.getMessage());
+                tracker.logError("Failed to generate website: " + e.getMessage());
             }
 
-            // Final Step: Completion
-            tracker.updateProgress("Finalizing and saving output files...");
+            // Finalize process
+            tracker.updateProgress("Finalizing output...");
             tracker.completeTracking();
-            tracker.logMessage("Process completed successfully! All files are saved in: " + userDir);
+            tracker.logMessage("Process completed successfully! Files saved in: " + userDir);
 
-        } catch (IOException e) {
-            System.err.println("\nAn error occurred during the process: " + e.getMessage());
         } catch (NumberFormatException e) {
-            System.err.println("\nInvalid numeric input. Please ensure you enter valid numbers.");
+            System.err.println("Invalid numeric input. Ensure you enter valid numbers.");
         }
     }
 
-    /**
-     * Helper method to get a valid numeric input.
-     *
-     * @param scanner The Scanner instance for user input.
-     * @return A valid integer input.
-     */
-    private static int getValidNumericInput(Scanner scanner) {
+    private static int getValidNumericInput(Scanner scanner, String prompt) {
+        System.out.print(prompt);
         while (true) {
             try {
                 return Integer.parseInt(scanner.nextLine().trim());
             } catch (NumberFormatException e) {
-                System.err.print("Invalid number. Please enter a valid numeric value: ");
+                System.err.print("Invalid number. Try again: ");
             }
         }
     }
 
-    /**
-     * Helper method to get validated user input based on a condition.
-     *
-     * @param scanner        The Scanner instance for user input.
-     * @param prompt         The prompt message for the user.
-     * @param validation     A validation function to check the input's validity.
-     * @param errorMessage   The error message to display if the input is invalid.
-     * @return The validated user input.
-     */
-    private static String getInputWithValidation(Scanner scanner, String prompt, java.util.function.Predicate<String> validation, String errorMessage) {
+    private static String getInputWithValidation(Scanner scanner, String prompt,
+                                                 java.util.function.Predicate<String> validation, String errorMessage) {
         System.out.print(prompt);
         String input = scanner.nextLine().trim();
         while (!validation.test(input)) {

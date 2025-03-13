@@ -2,194 +2,194 @@ package org.example;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDPage;
-import org.apache.pdfbox.pdmodel.font.PDType0Font;
-import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.rendering.PDFRenderer;
+import org.apache.pdfbox.rendering.ImageType;
+import org.apache.pdfbox.text.PDFTextStripper;
 
-import java.awt.Color; // Used for QR code color customization
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.*;
 
 public class SmartQRCodeGenerator {
 
-    private static final int QR_CODE_SIZE = 100; // QR Code size in pixels
-    private static final int MARGIN = 50; // Margin from page edges
-    private static final int SPACING = 20; // Spacing between QR codes
+    private final FolderManager folderManager = new FolderManager();
+    private final List<String> colors = Arrays.asList("bg-primary", "bg-success", "bg-info", "bg-warning", "bg-danger");
 
     /**
-     * Dynamically places QR codes into the PDF using intelligent logic.
-     *
-     * @param pdfPath    Path to the original PDF document.
-     * @param qrData     Mapping of page numbers to QR codes.
-     * @param outputPath Path to save the updated PDF with QR codes embedded.
-     * @throws IOException If an error occurs while processing the PDF.
+     * Converts the updated PDF content into a responsive website with QR codes, extracted text, and headings.
      */
-    public void placeSmartQRCodes(String pdfPath, HashMap<Integer, List<QRCodeDetails>> qrData, String outputPath) throws IOException {
-        try (PDDocument document = Loader.loadPDF(new File(pdfPath))) {
+    public void convertPDFToWebsite(String pdfPath, HashMap<Integer, List<QRCodeDetails>> qrData,
+                                    String websiteOutputDir) throws IOException {
+        // Create website directory
+        String userWebsiteDir = folderManager.createUserDirectory(websiteOutputDir, "Website");
 
-            // Load italic font
-            PDType0Font italicFont = PDType0Font.load(document, new File("src/main/resources/fonts/timesi.ttf"));
+        // Create subdirectories for QR codes and extracted images
+        String qrCodesDir = folderManager.createDocumentDirectory(userWebsiteDir, "QrCodes");
+        String imagesDir = folderManager.createDocumentDirectory(userWebsiteDir, "ExtractedImages");
 
-            for (var entry : qrData.entrySet()) {
-                int pageNo = entry.getKey();
-                List<QRCodeDetails> detailsList = entry.getValue();
+        // Create the main index.html file
+        File indexFile = new File(userWebsiteDir, "index.html");
+        try (PrintWriter writer = new PrintWriter(indexFile);
+             PDDocument document = Loader.loadPDF(new File(pdfPath))) {
 
-                PDPage page = (pageNo - 1 < document.getNumberOfPages()) ?
-                        document.getPage(pageNo - 1) : new PDPage();
-
-                // Add new page if needed
-                if (pageNo > document.getNumberOfPages()) {
-                    document.addPage(page);
-                }
-
-                // Analyze and place QR codes on the page
-                placeQRCodesOnPage(document, page, detailsList, italicFont);
-            }
-
-            // Save the updated PDF
-            document.save(outputPath);
-            System.out.println("Smart QR Code placement completed. File saved at: " + outputPath);
-
-            // Convert the final PDF to a website
-            convertPDFToWebsite(outputPath);
-        }
-    }
-
-    /**
-     * Places QR codes on the specified page with layout-aware positioning.
-     *
-     * @param document   The PDF document.
-     * @param page       The current PDF page.
-     * @param qrCodes    The list of QR code details for placement.
-     * @param font       The font to use for annotations.
-     * @throws IOException If an error occurs during QR code placement.
-     */
-    private void placeQRCodesOnPage(PDDocument document, PDPage page, List<QRCodeDetails> qrCodes, PDType0Font font) throws IOException {
-        float pageWidth = page.getMediaBox().getWidth();
-        float pageHeight = page.getMediaBox().getHeight();
-
-        // Use stack to manage QR code positions
-        Stack<float[]> placementStack = new Stack<>();
-
-        float x = pageWidth - MARGIN - QR_CODE_SIZE; // Start at right margin
-        float y = pageHeight - MARGIN; // Start at top margin
-
-        // Push initial position to stack
-        placementStack.push(new float[]{x, y});
-
-        try (var contentStream = new org.apache.pdfbox.pdmodel.PDPageContentStream(
-                document, page, org.apache.pdfbox.pdmodel.PDPageContentStream.AppendMode.APPEND, true)) {
-
-            for (QRCodeDetails qr : qrCodes) {
-                // Use random colors for QR codes
-                Color qrColor = getRandomColor();
-
-                // Load the QR code image
-                PDImageXObject qrImage = PDImageXObject.createFromFile(qr.getQrFilePath(), document);
-
-                // Extract the last part of the link for annotation
-                String qrName = extractLastPartOfLink(qr.getLink());
-
-                // Check if placement fits or backtrack
-                if (y - QR_CODE_SIZE < MARGIN) { // If space runs out
-                    if (!placementStack.isEmpty()) {
-                        // Backtrack to the previous valid placement
-                        float[] previousPosition = placementStack.pop();
-                        x = previousPosition[0] - (QR_CODE_SIZE + SPACING);
-                        y = previousPosition[1];
-                    } else {
-                        // No space left, create a new page
-                        PDPage newPage = new PDPage();
-                        document.addPage(newPage);
-                        contentStream.close();
-
-                        // Recursive call for remaining QR codes
-                        placeQRCodesOnPage(document, newPage, qrCodes.subList(qrCodes.indexOf(qr), qrCodes.size()), font);
-                        return;
-                    }
-                }
-
-                // Draw the QR code image
-                contentStream.drawImage(qrImage, x, y - QR_CODE_SIZE, QR_CODE_SIZE, QR_CODE_SIZE);
-
-                // Annotate the QR code with its text or link description
-                contentStream.beginText();
-                contentStream.setFont(font, 10);
-                contentStream.newLineAtOffset(x, y - QR_CODE_SIZE - 15);
-                contentStream.showText(qrName);
-                contentStream.endText();
-
-                // Update position
-                y -= (QR_CODE_SIZE + SPACING);
-
-                // Save current position to the stack
-                placementStack.push(new float[]{x, y});
-            }
-        }
-    }
-
-    /**
-     * Extracts the last part of a URL or string (e.g., after the last "/" or "#").
-     *
-     * @param link The full URL or string.
-     * @return The last part of the link.
-     */
-    private String extractLastPartOfLink(String link) {
-        if (link == null || link.isEmpty()) return "Unknown";
-        String[] parts = link.split("[/#]");
-        return parts[parts.length - 1];
-    }
-
-    /**
-     * Generates a random color for QR codes.
-     *
-     * @return A random color instance.
-     */
-    private Color getRandomColor() {
-        Random random = new Random();
-        return new Color(random.nextInt(256), random.nextInt(256), random.nextInt(256));
-    }
-
-    /**
-     * Converts the final PDF into a website by generating HTML, CSS, and JavaScript files.
-     *
-     * @param pdfPath The path of the PDF document to convert.
-     * @throws IOException If an error occurs during file generation.
-     */
-    private void convertPDFToWebsite(String pdfPath) throws IOException {
-        String htmlPath = pdfPath.replace(".pdf", ".html");
-        File htmlFile = new File(htmlPath);
-
-        try (var writer = new java.io.PrintWriter(htmlFile)) {
-            writer.println("<!DOCTYPE html>");
-            writer.println("<html lang=\"en\">");
-            writer.println("<head>");
-            writer.println("<meta charset=\"UTF-8\">");
-            writer.println("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
-            writer.println("<title>QR Code Website</title>");
-            writer.println("<style>");
-            writer.println("table { border-collapse: collapse; width: 100%; }");
-            writer.println("th, td { border: 1px solid black; padding: 8px; text-align: left; }");
-            writer.println("</style>");
-            writer.println("</head>");
+            writer.println(generateHTMLHeader("QR Code Website"));
             writer.println("<body>");
-            writer.println("<h1>QR Codes</h1>");
-            writer.println("<table>");
-            writer.println("<tr><th>QR Code Name</th><th>QR Code</th></tr>");
+            writer.println(generateNavbar("QR Code Website"));
+            writer.println("<div class='container mt-4'>");
+            writer.println("<h1 class='display-4 text-center mb-4'>QR Code Index</h1>");
 
-            for (int i = 1; i <= 10; i++) {
-                writer.println("<tr>");
-                writer.println("<td>QR Code " + i + "</td>");
-                writer.println("<td><img src='path_to_qr_" + i + ".png' alt='QR Code " + i + "'/></td>");
+            // Create a table layout for page navigation
+            writer.println("<table class='table table-bordered table-striped text-center'>");
+            writer.println("<thead class='table-dark'><tr>");
+            writer.println("<th>Page No</th><th>Page No</th><th>Page No</th><th>Page No</th><th>Page No</th>");
+            writer.println("</tr></thead>");
+            writer.println("<tbody>");
+
+            // Sort page numbers in ascending order
+            List<Integer> sortedPageNumbers = new ArrayList<>(qrData.keySet());
+            Collections.sort(sortedPageNumbers);
+
+            int columnCounter = 0;
+            for (int i = 0; i < sortedPageNumbers.size(); i++) {
+                // Start a new row every 5 columns
+                if (columnCounter == 0) {
+                    writer.println("<tr>");
+                }
+
+                // Assign a unique color from the list in a repeating pattern
+                String colorClass = colors.get(i % colors.size());
+                int pageNo = sortedPageNumbers.get(i);
+                writer.println("<td class='" + colorClass + "'><a class='text-white' href='Page_" + pageNo + ".html'>Page " + pageNo + "</a></td>");
+
+                columnCounter++;
+                if (columnCounter == 5) { // End the row after 5 columns
+                    writer.println("</tr>");
+                    columnCounter = 0;
+                }
+            }
+
+            // Close the last row if it's incomplete
+            if (columnCounter != 0) {
                 writer.println("</tr>");
             }
 
+            writer.println("</tbody>");
             writer.println("</table>");
+            writer.println("</div>");
             writer.println("</body>");
             writer.println("</html>");
-        }
 
-        System.out.println("Website HTML generated at: " + htmlPath);
+            // Generate individual page files
+            PDFTextStripper textStripper = new PDFTextStripper();
+            for (var entry : qrData.entrySet()) {
+                createPageHTML(userWebsiteDir, document, textStripper, entry, entry.getKey());
+            }
+        }
+    }
+
+    /**
+     * Helper method to create an individual page HTML file.
+     */
+    private void createPageHTML(String userWebsiteDir, PDDocument document, PDFTextStripper textStripper,
+                                Map.Entry<Integer, List<QRCodeDetails>> entry, int pageNo) throws IOException {
+        File pageFile = new File(userWebsiteDir, "Page_" + pageNo + ".html");
+        try (PrintWriter pageWriter = new PrintWriter(pageFile)) {
+            pageWriter.println(generateHTMLHeader("Page " + pageNo));
+            pageWriter.println("<body>");
+            pageWriter.println(generateNavbar("Page " + pageNo));
+            pageWriter.println("<div class='container mt-4'>");
+
+            // Extract and display page text
+            textStripper.setStartPage(pageNo);
+            textStripper.setEndPage(pageNo);
+            String pageText = textStripper.getText(document);
+
+            pageWriter.println("<h1 class='mb-4 text-primary text-center'>Page " + pageNo + "</h1>");
+            pageWriter.println("<p class='lead text-justify'>" + pageText.replace("\n", "<br>") + "</p>");
+
+            // Display extracted images if present
+            String pageImagePath = "./ExtractedImages/Page_" + pageNo + ".png";
+            File imageFile = new File(pageImagePath);
+            if (imageFile.exists()) {
+                pageWriter.println("<div class='text-center my-4'>");
+                pageWriter.println("<img src='" + pageImagePath + "' class='img-fluid rounded' alt='Page Image'>");
+                pageWriter.println("</div>");
+            }
+
+            // Display QR codes
+            pageWriter.println("<div class='row mt-4'>");
+            for (QRCodeDetails details : entry.getValue()) {
+                writeQRCard(pageWriter, details);
+            }
+            pageWriter.println("</div>");
+
+            pageWriter.println("</div>");
+            pageWriter.println("<a href='index.html' class='btn btn-secondary mt-3'>Back to Index</a>");
+            pageWriter.println("</body>");
+            pageWriter.println("</html>");
+        }
+    }
+
+    /**
+     * Extracts all images from the PDF and saves them to the output directory.
+     */
+    public void extractImagesFromPDF(String pdfPath, String extractedImagesDir) throws IOException {
+        String imagesDir = folderManager.createDocumentDirectory(extractedImagesDir, "ExtractedImages");
+
+        try (PDDocument document = Loader.loadPDF(new File(pdfPath))) {
+            PDFRenderer renderer = new PDFRenderer(document);
+            for (int pageIndex = 0; pageIndex < document.getNumberOfPages(); pageIndex++) {
+                BufferedImage image = renderer.renderImageWithDPI(pageIndex, 300, ImageType.RGB);
+                String imageName = "Page_" + (pageIndex + 1) + ".png";
+                File outputImageFile = new File(imagesDir, imageName);
+                ImageIO.write(image, "PNG", outputImageFile);
+                System.out.println("[INFO] Extracted image saved at: " + outputImageFile.getAbsolutePath());
+            }
+        }
+    }
+
+    /**
+     * Helper method to generate an HTML header.
+     */
+    private String generateHTMLHeader(String title) {
+        return "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>" +
+                "<meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
+                "<link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css'>" +
+                "<link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css'>" +
+                "<title>" + title + "</title></head>";
+    }
+
+    /**
+     * Helper method to generate a navigation bar.
+     */
+    private String generateNavbar(String brandName) {
+        return "<nav class='navbar navbar-expand-lg navbar-dark bg-dark'>" +
+                "<div class='container-fluid'>" +
+                "<a class='navbar-brand' href='index.html'>" + brandName + "</a>" +
+                "<button class='navbar-toggler' type='button' data-bs-toggle='collapse' data-bs-target='#navbarNav' aria-controls='navbarNav' aria-expanded='false' aria-label='Toggle navigation'>" +
+                "<span class='navbar-toggler-icon'></span></button>" +
+                "<div class='collapse navbar-collapse' id='navbarNav'>" +
+                "<ul class='navbar-nav'>" +
+                "<li class='nav-item'><a class='nav-link active' href='index.html'>Home</a></li>" +
+                "</ul></div></div></nav>";
+    }
+
+    /**
+     * Helper method to write a QR code card HTML snippet.
+     */
+    private void writeQRCard(PrintWriter writer, QRCodeDetails details) {
+        writer.println("<div class='col-md-4 mb-4'>");
+        writer.println("<div class='card shadow-lg'>");
+        writer.println("<img src='./QrCodes/" + details.getQrFilePath() + "' class='card-img-top' alt='QR Code'>");
+        writer.println("<div class='card-body'>");
+        writer.println("<h5 class='card-title'>" + details.getText() + "</h5>");
+        writer.println("<a href='" + details.getLink() + "' class='btn btn-primary'>");
+        writer.println("<i class='bi bi-arrow-right-circle'></i> Visit Link</a>");
+        writer.println("</div>"); // Close card-body
+        writer.println("</div>"); // Close card
+        writer.println("</div>"); // Close column
     }
 }

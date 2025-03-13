@@ -5,20 +5,32 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class ProgressTracker {
 
-    private long startTime;
-    private AtomicInteger totalSteps = new AtomicInteger(0); // Support for dynamic step adjustments
-    private AtomicInteger completedSteps = new AtomicInteger(0); // Track completed steps
+    private long startTime; // Tracks the start time of the process
+    private final AtomicInteger totalSteps = new AtomicInteger(0); // Total steps in the process
+    private final AtomicInteger completedSteps = new AtomicInteger(0); // Completed steps count
+    private boolean isTracking = false; // Tracks whether the process has started
 
     /**
      * Starts tracking the progress of a task.
      *
      * @param totalSteps The total number of steps in the process.
      */
-    public void startTracking(int totalSteps) {
-        this.startTime = System.currentTimeMillis();
+    public synchronized void startTracking(int totalSteps) {
+        if (isTracking) {
+            logError("Tracking already in progress!");
+            return;
+        }
+
+        if (totalSteps <= 0) {
+            logError("Total steps must be greater than zero!");
+            return;
+        }
+
+        this.startTime = System.currentTimeMillis(); // Record the start time
         this.totalSteps.set(totalSteps);
         this.completedSteps.set(0);
-        System.out.println("Process started with " + totalSteps + " steps.");
+        this.isTracking = true;
+        logMessage("Process started with " + totalSteps + " steps.");
     }
 
     /**
@@ -26,44 +38,62 @@ public class ProgressTracker {
      *
      * @param description A description of the task being completed.
      */
-    public void updateProgress(String description) {
-        int currentStep = completedSteps.incrementAndGet();
-        if (currentStep > totalSteps.get()) {
-            System.out.println("Error: Current step exceeds total steps.");
+    public synchronized void updateProgress(String description) {
+        if (!isTracking) {
+            logError("Cannot update progress. Tracking has not been started.");
             return;
         }
 
-        // Calculate percentage
+        int currentStep = completedSteps.incrementAndGet();
+
+        if (currentStep > totalSteps.get()) {
+            logError("Current step exceeds total steps.");
+            return;
+        }
+
+        // Calculate progress percentage
         double percentage = ((double) currentStep / totalSteps.get()) * 100;
         DecimalFormat df = new DecimalFormat("0.00");
 
-        // Display progress
-        System.out.println("Step " + currentStep + "/" + totalSteps.get() + " Completed (" + df.format(percentage) + "%)");
-        System.out.println("Task: " + description);
+        // Display the progress update
+        logMessage("Step " + currentStep + "/" + totalSteps.get() + " Completed (" + df.format(percentage) + "%)");
+        logMessage("Task: " + description);
     }
 
     /**
-     * Completes the progress and logs the total time taken.
+     * Completes the tracking process and logs the total time taken.
      */
-    public void completeTracking() {
+    public synchronized void completeTracking() {
+        if (!isTracking) {
+            logError("Cannot complete tracking. Tracking has not been started.");
+            return;
+        }
+
         long endTime = System.currentTimeMillis();
         long duration = endTime - startTime;
 
-        System.out.println("Process completed in " + formatDuration(duration) + ".");
+        logMessage("Process completed in " + formatDuration(duration) + ".");
+        isTracking = false;
     }
 
     /**
-     * Dynamically adjusts the total steps during execution.
+     * Dynamically adjusts the total number of steps during execution.
      *
      * @param newTotalSteps The new total number of steps.
      */
-    public void adjustTotalSteps(int newTotalSteps) {
-        if (newTotalSteps < completedSteps.get()) {
-            System.out.println("Error: New total steps cannot be less than completed steps.");
+    public synchronized void adjustTotalSteps(int newTotalSteps) {
+        if (!isTracking) {
+            logError("Cannot adjust steps. Tracking has not been started.");
             return;
         }
+
+        if (newTotalSteps < completedSteps.get()) {
+            logError("New total steps cannot be less than completed steps.");
+            return;
+        }
+
         this.totalSteps.set(newTotalSteps);
-        System.out.println("Total steps updated to: " + newTotalSteps);
+        logMessage("Total steps updated to: " + newTotalSteps);
     }
 
     /**
@@ -81,11 +111,55 @@ public class ProgressTracker {
     }
 
     /**
-     * Logs a custom message for debugging or updates.
+     * Provides the percentage of progress completed.
+     *
+     * @return The progress percentage as a formatted string.
+     */
+    public synchronized String getProgressPercentage() {
+        if (!isTracking) {
+            return "0.00%";
+        }
+
+        double percentage = ((double) completedSteps.get() / totalSteps.get()) * 100;
+        DecimalFormat df = new DecimalFormat("0.00");
+        return df.format(percentage) + "%";
+    }
+
+    /**
+     * Checks if the process is complete.
+     *
+     * @return True if all steps are completed, false otherwise.
+     */
+    public synchronized boolean isComplete() {
+        return completedSteps.get() >= totalSteps.get() && isTracking;
+    }
+
+    /**
+     * Resets the tracker to allow for a new process.
+     */
+    public synchronized void resetTracker() {
+        this.startTime = 0;
+        this.totalSteps.set(0);
+        this.completedSteps.set(0);
+        this.isTracking = false;
+        logMessage("Tracker has been reset.");
+    }
+
+    /**
+     * Logs a custom informational message.
      *
      * @param message The message to log.
      */
-    public void logMessage(String message) {
-        System.out.println("[LOG] " + message);
+    public synchronized void logMessage(String message) {
+        System.out.println("[INFO] " + message);
+    }
+
+    /**
+     * Logs an error message.
+     *
+     * @param errorMessage The error message to log.
+     */
+    public synchronized void logError(String errorMessage) {
+        System.err.println("[ERROR] " + errorMessage);
     }
 }

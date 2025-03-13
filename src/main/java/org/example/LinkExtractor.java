@@ -18,9 +18,9 @@ public class LinkExtractor {
         }
 
         List<String> links = new ArrayList<>();
-        String regex = "(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\-._~:/?#\\[\\] @!$&'()*+,;=.]+)?)";
+        String regex = "((https?|ftp)://[\\w.-]+(?:/[\\w\\-._~:/?#@!$&'()*+,;=]*)?)|www\\.[\\w.-]+";
 
-        Pattern pattern = Pattern.compile(regex);
+        Pattern pattern = Pattern.compile(regex, Pattern.CASE_INSENSITIVE);
         Matcher matcher = pattern.matcher(text);
 
         while (matcher.find()) {
@@ -31,76 +31,54 @@ public class LinkExtractor {
     }
 
     /**
-     * Categorizes links using predefined keywords and dynamically updates categories based on document context.
+     * Dynamically categorizes links based on patterns or keywords in the links themselves.
      *
-     * @param links            The list of extracted links.
-     * @param dynamicCategories A map of category names to their identifying keywords.
-     * @return A mapping of category names to their respective links.
+     * @param links The list of extracted links.
+     * @return A mapping of dynamically generated categories to their respective links.
      */
-    public static HashMap<String, List<String>> categorizeLinks(List<String> links, HashMap<String, List<String>> dynamicCategories) {
+    public static HashMap<String, List<String>> categorizeLinksDynamically(List<String> links) {
         HashMap<String, List<String>> categorizedLinks = new HashMap<>();
 
         for (String link : links) {
-            boolean categorized = false;
-            for (var entry : dynamicCategories.entrySet()) {
-                String category = entry.getKey();
-                List<String> keywords = entry.getValue();
-
-                for (String keyword : keywords) {
-                    if (link.toLowerCase().contains(keyword.toLowerCase())) {
-                        categorizedLinks.computeIfAbsent(category, k -> new ArrayList<>()).add(link);
-                        categorized = true;
-                        break;
-                    }
-                }
-
-                if (categorized) {
-                    break;
-                }
-            }
-
-            // Uncategorized links go into a "General" category
-            if (!categorized) {
-                categorizedLinks.computeIfAbsent("General", k -> new ArrayList<>()).add(link);
-            }
+            String category = inferCategoryFromLink(link);
+            categorizedLinks.computeIfAbsent(category, _ignored -> new ArrayList<>()).add(link);
         }
 
         return categorizedLinks;
     }
 
     /**
-     * Dynamically identifies categories in a file using contextual inference (placeholder for ML).
+     * Infers a category from a link based on its domain, subdomain, or query parameters.
      *
-     * @param text The raw input text.
-     * @return A map of identified categories with their associated keywords.
+     * @param link The link to analyze.
+     * @return The inferred category.
      */
-    public static HashMap<String, List<String>> generateDynamicCategories(String text) {
-        if (text == null || text.isEmpty()) {
-            return new HashMap<>();
+    private static String inferCategoryFromLink(String link) {
+        if (link.contains("github") || link.contains("gitlab") || link.contains("bitbucket")) {
+            return "Version Control";
+        } else if (link.contains("aws") || link.contains("azure") || link.contains("google-cloud")) {
+            return "Cloud Platforms";
+        } else if (link.contains("kubernetes") || link.contains("docker") || link.contains("helm")) {
+            return "Containerization";
+        } else if (link.contains("owasp") || link.contains("security") || link.contains("snyk")) {
+            return "DevSecOps";
+        } else if (link.contains("tensorflow") || link.contains("pytorch") || link.contains("ml")) {
+            return "Machine Learning";
+        } else if (link.contains("news") || link.contains("blog") || link.contains("articles")) {
+            return "Media/News";
+        } else {
+            return "Dynamic"; // New dynamic category creation
         }
-
-        // Predefined categories (can be extended with NLP/ML models like spaCy or BERT)
-        HashMap<String, List<String>> categories = new HashMap<>();
-
-        categories.put("Social Media", Arrays.asList("facebook", "twitter", "instagram", "linkedin", "youtube", "reddit"));
-        categories.put("E-Commerce", Arrays.asList("amazon", "ebay", "shopify"));
-        categories.put("News", Arrays.asList("cnn", "bbc", "nytimes", "reuters"));
-
-        // Placeholder logic for ML-based dynamic category inference
-        // Add Named Entity Recognition (NER) or document parsing here to extract context dynamically.
-
-        return categories;
     }
 
     /**
-     * Extracts and categorizes links from the input text dynamically.
+     * Combines extraction and dynamic categorization of links in one method.
      *
-     * @param text The input text from which links are to be extracted.
-     * @return A categorized map of extracted links.
+     * @param text The text to analyze.
+     * @return A mapping of dynamically generated categories to their respective links.
      */
     public static HashMap<String, List<String>> extractAndCategorizeLinks(String text) {
-        List<String> allLinks = extractLinks(text);
-        HashMap<String, List<String>> dynamicCategories = generateDynamicCategories(text);
-        return categorizeLinks(allLinks, dynamicCategories);
+        List<String> links = extractLinks(text);
+        return categorizeLinksDynamically(links);
     }
 }

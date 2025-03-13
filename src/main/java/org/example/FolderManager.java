@@ -2,8 +2,7 @@ package org.example;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.nio.file.*;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Set;
@@ -19,18 +18,19 @@ public class FolderManager {
      * @throws IOException If the directory cannot be created or lacks permissions.
      */
     public String createUserDirectory(String basePath, String userName) throws IOException {
-        String userDirPath = basePath + (basePath.endsWith("/") || basePath.endsWith("\\") ? "" : "/") + userName;
+        String userDirPath = basePath + (basePath.endsWith("/") || basePath.endsWith("\\") ? "" : "/") + sanitizeFolderName(userName);
         Path userDir = Path.of(userDirPath);
 
         if (!Files.exists(userDir)) {
             Files.createDirectories(userDir);
-            setDirectoryPermissions(userDir); // Grant permissions if necessary
+            System.out.println("[INFO] User directory created: " + userDirPath);
+            setDirectoryPermissions(userDir); // Apply permissions
+        } else {
+            System.out.println("[INFO] User directory already exists: " + userDirPath);
         }
 
         // Verify write access
-        if (!Files.isWritable(userDir)) {
-            throw new IOException("Write permission denied for directory: " + userDirPath);
-        }
+        validateWritableDirectory(userDirPath);
 
         return userDirPath;
     }
@@ -44,18 +44,19 @@ public class FolderManager {
      * @throws IOException If the folder cannot be created or lacks permissions.
      */
     public String createDocumentDirectory(String userDir, String fileName) throws IOException {
-        String docDirPath = userDir + "/" + fileName;
+        String docDirPath = userDir + "/" + sanitizeFolderName(fileName);
         Path docDir = Path.of(docDirPath);
 
         if (!Files.exists(docDir)) {
             Files.createDirectory(docDir);
-            setDirectoryPermissions(docDir); // Grant permissions if necessary
+            System.out.println("[INFO] Document directory created: " + docDirPath);
+            setDirectoryPermissions(docDir); // Apply permissions
+        } else {
+            System.out.println("[INFO] Document directory already exists: " + docDirPath);
         }
 
         // Verify write access
-        if (!Files.isWritable(docDir)) {
-            throw new IOException("Write permission denied for directory: " + docDirPath);
-        }
+        validateWritableDirectory(docDirPath);
 
         return docDirPath;
     }
@@ -74,13 +75,14 @@ public class FolderManager {
 
         if (!Files.exists(pageDir)) {
             Files.createDirectories(pageDir);
-            setDirectoryPermissions(pageDir); // Grant permissions if necessary
+            System.out.println("[INFO] Page directory created for page " + pageNo + ": " + pageDirPath);
+            setDirectoryPermissions(pageDir); // Apply permissions
+        } else {
+            System.out.println("[INFO] Page directory already exists for page " + pageNo + ": " + pageDirPath);
         }
 
         // Verify write access
-        if (!Files.isWritable(pageDir)) {
-            throw new IOException("Write permission denied for directory: " + pageDirPath);
-        }
+        validateWritableDirectory(pageDirPath);
 
         return pageDirPath;
     }
@@ -92,23 +94,51 @@ public class FolderManager {
      * @return A sanitized folder name.
      */
     public static String sanitizeFolderName(String name) {
+        if (name == null || name.isEmpty()) {
+            return "default_name";
+        }
         return name.replaceAll("[^a-zA-Z0-9-_]", "_");
     }
 
     /**
-     * Grants full directory permissions if the OS and file system support it.
+     * Grants directory permissions dynamically based on the operating system.
      *
      * @param path The path to the directory.
      * @throws IOException If permissions cannot be applied.
      */
     private void setDirectoryPermissions(Path path) throws IOException {
-        try {
-            // Set permissions for UNIX-like systems (if applicable)
-            Set<PosixFilePermission> permissions =
-                    PosixFilePermissions.fromString("rwxrwxrwx"); // Full permissions
-            Files.setPosixFilePermissions(path, permissions);
-        } catch (UnsupportedOperationException e) {
-            // If POSIX permissions are not supported (e.g., Windows), do nothing
+        String osName = System.getProperty("os.name").toLowerCase();
+
+        if (osName.contains("win")) {
+            // Windows: Verify if the directory is writable
+            System.out.println("[INFO] Skipping POSIX permissions. Running on Windows.");
+            if (!Files.isWritable(path)) {
+                throw new IOException("[ERROR] Directory is not writable: " + path);
+            }
+        } else if (osName.contains("linux") || osName.contains("mac")) {
+            try {
+                // Apply POSIX permissions for UNIX-like systems
+                Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rwxrwxrwx");
+                Files.setPosixFilePermissions(path, permissions);
+                System.out.println("[INFO] POSIX permissions applied: " + path);
+            } catch (UnsupportedOperationException e) {
+                System.out.println("[WARN] POSIX permissions not supported on this file system: " + path);
+            }
+        } else {
+            System.out.println("[INFO] Unknown OS. Ensuring directory is accessible: " + path);
+        }
+    }
+
+    /**
+     * Validates if a directory is writable, throwing an IOException if it is not.
+     *
+     * @param dirPath The directory path to validate.
+     * @throws IOException If the directory is not writable.
+     */
+    private void validateWritableDirectory(String dirPath) throws IOException {
+        Path path = Path.of(dirPath);
+        if (!Files.isWritable(path)) {
+            throw new IOException("[ERROR] Write permission denied for directory: " + dirPath);
         }
     }
 }

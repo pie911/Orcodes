@@ -3,6 +3,10 @@ package org.example;
 import java.io.Serializable;
 import java.util.Objects;
 
+/**
+ * Represents the details of a QR code, including the page number, link, associated text,
+ * and file path to the QR code image.
+ */
 public class QRCodeDetails implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -12,10 +16,18 @@ public class QRCodeDetails implements Serializable {
     private String text; // The associated text or description (mutable for dynamic updates)
     private final String qrFilePath; // The file path to the saved QR code image
 
-    // Constructor
-    public QRCodeDetails(int pageNo, String link, String qrFilePath, String s) {
+    /**
+     * Constructor for QRCodeDetails.
+     *
+     * @param pageNo     The page number where the QR code is placed (must be >= 1).
+     * @param link       The URL or link encoded in the QR code (non-null and non-empty).
+     * @param qrFilePath The file path to the saved QR code image (non-null and non-empty).
+     * @param text       The associated text or description (optional, can be null).
+     * @throws IllegalArgumentException if any parameter is invalid.
+     */
+    public QRCodeDetails(int pageNo, String link, String qrFilePath, String text) {
         if (pageNo < 1) {
-            throw new IllegalArgumentException("Page number must be greater than or equal to 1.");
+            throw new IllegalArgumentException("Invalid page number: " + pageNo + ". Page number must be >= 1.");
         }
         if (link == null || link.isEmpty()) {
             throw new IllegalArgumentException("Link cannot be null or empty.");
@@ -26,8 +38,8 @@ public class QRCodeDetails implements Serializable {
 
         this.pageNo = pageNo;
         this.link = link;
-        this.qrFilePath = qrFilePath; // Assign the file path
-        this.text = ""; // Initialize as empty; can be dynamically updated later
+        this.qrFilePath = qrFilePath;
+        this.text = text != null ? text : ""; // Default to empty if null
     }
 
     // Getters
@@ -47,27 +59,17 @@ public class QRCodeDetails implements Serializable {
         return qrFilePath;
     }
 
-    public String getQrCodePath() {
-        return qrFilePath;
-    }
-
-    // Setter for text (allows dynamic updates)
+    // Allows dynamic updates to the text description
     public void setText(String text) {
         this.text = text;
     }
 
-    // ToString for Debugging
     @Override
     public String toString() {
-        return "QRCodeDetails{" +
-                "pageNo=" + pageNo +
-                ", link='" + link + '\'' +
-                ", text='" + text + '\'' +
-                ", qrFilePath='" + qrFilePath + '\'' +
-                '}';
+        return String.format("QRCodeDetails{pageNo=%d, link='%s', text='%s', qrFilePath='%s'}",
+                pageNo, link.length() > 50 ? link.substring(0, 47) + "..." : link, text, qrFilePath);
     }
 
-    // Equals and HashCode for comparison
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

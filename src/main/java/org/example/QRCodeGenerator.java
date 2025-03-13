@@ -11,13 +11,14 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class QRCodeGenerator {
 
     /**
-     * Generates QR codes for each link extracted from the document and saves them in appropriate folders.
-     * Dynamically handles QR code resizing based on user inputs or machine learning algorithms.
+     * Generates QR codes for each unique link extracted from the document and saves them in appropriate folders.
      *
      * @param pageLinks  A mapping of page numbers to a list of links.
      * @param baseDir    The base directory where QR codes should be saved.
@@ -30,6 +31,7 @@ public class QRCodeGenerator {
             HashMap<Integer, List<String>> pageLinks, String baseDir, int width, int height) throws IOException {
 
         HashMap<Integer, List<QRCodeDetails>> qrCodeDetailsMap = new HashMap<>();
+        Set<String> processedLinks = new HashSet<>(); // To avoid duplicate QR code generation
 
         for (var entry : pageLinks.entrySet()) {
             int pageNo = entry.getKey();
@@ -37,12 +39,15 @@ public class QRCodeGenerator {
 
             // Ensure each page has its own directory for QR codes
             String pageDir = baseDir + "/Page_" + pageNo;
-            if (!Files.exists(Path.of(pageDir))) {
-                Files.createDirectories(Path.of(pageDir));
-            }
+            createDirectory(pageDir);
 
             System.out.println("Generating QR codes for page " + pageNo + "...");
             for (String link : links) {
+                if (!processedLinks.add(link)) { // Skip duplicate links
+                    System.out.println("[INFO] Duplicate link detected, skipping: " + link);
+                    continue;
+                }
+
                 // Sanitize the link to generate a valid QR code file name
                 String qrFileName = Utils.sanitizeFileName(link) + ".png";
                 String qrFilePath = pageDir + "/" + qrFileName;
@@ -50,12 +55,12 @@ public class QRCodeGenerator {
                 // Generate the QR code and save it to the specified path
                 try {
                     generateQRCodeImage(link, width, height, qrFilePath);
-                    System.out.println("QR code generated and saved at: " + qrFilePath);
+                    System.out.println("[INFO] QR code generated and saved at: " + qrFilePath);
                 } catch (WriterException e) {
-                    System.err.println("Error generating QR code for link: " + link + " - " + e.getMessage());
+                    System.err.println("[ERROR] Error generating QR code for link: " + link + " - " + e.getMessage());
                     continue; // Skip this link and proceed with the next one
                 } catch (IOException e) {
-                    System.err.println("Error saving QR code for link: " + link + " - " + e.getMessage());
+                    System.err.println("[ERROR] Error saving QR code for link: " + link + " - " + e.getMessage());
                     continue; // Skip this link and proceed with the next one
                 }
 
@@ -66,7 +71,7 @@ public class QRCodeGenerator {
             }
         }
 
-        System.out.println("QR code generation completed.");
+        System.out.println("[INFO] QR code generation completed.");
         return qrCodeDetailsMap;
     }
 
@@ -85,9 +90,7 @@ public class QRCodeGenerator {
 
         // Create parent directories if they don't exist
         Path parentPath = FileSystems.getDefault().getPath(filePath).getParent();
-        if (!Files.exists(parentPath)) {
-            Files.createDirectories(parentPath);
-        }
+        createDirectory(parentPath.toString());
 
         // Generate the QR code as a BitMatrix
         BitMatrix bitMatrix = qrCodeWriter.encode(text, BarcodeFormat.QR_CODE, width, height);
@@ -95,5 +98,19 @@ public class QRCodeGenerator {
         // Save the QR code image as a PNG file
         Path outputPath = FileSystems.getDefault().getPath(filePath);
         MatrixToImageWriter.writeToPath(bitMatrix, "PNG", outputPath);
+    }
+
+    /**
+     * Creates a directory if it does not exist.
+     *
+     * @param dirPath The directory path to create.
+     * @throws IOException If there is an error creating the directory.
+     */
+    private void createDirectory(String dirPath) throws IOException {
+        Path dir = Path.of(dirPath);
+        if (!Files.exists(dir)) {
+            Files.createDirectories(dir);
+            System.out.println("[INFO] Directory created: " + dirPath);
+        }
     }
 }
