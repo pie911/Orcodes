@@ -18,9 +18,11 @@ public class FolderManager {
      * @throws IOException If the directory cannot be created or lacks permissions.
      */
     public String createUserDirectory(String basePath, String userName) throws IOException {
+        // Sanitize user-provided folder name
         String userDirPath = basePath + (basePath.endsWith("/") || basePath.endsWith("\\") ? "" : "/") + sanitizeFolderName(userName);
         Path userDir = Path.of(userDirPath);
 
+        // Create directories if they do not exist
         if (!Files.exists(userDir)) {
             Files.createDirectories(userDir);
             System.out.println("[INFO] User directory created: " + userDirPath);
@@ -31,6 +33,9 @@ public class FolderManager {
 
         // Verify write access
         validateWritableDirectory(userDirPath);
+
+        // Run garbage collection after folder creation to release temporary resources
+        runGarbageCollection("[INFO] Garbage collection executed after creating user directory.");
 
         return userDirPath;
     }
@@ -47,6 +52,7 @@ public class FolderManager {
         String docDirPath = userDir + "/" + sanitizeFolderName(fileName);
         Path docDir = Path.of(docDirPath);
 
+        // Create document directory if it doesn't exist
         if (!Files.exists(docDir)) {
             Files.createDirectory(docDir);
             System.out.println("[INFO] Document directory created: " + docDirPath);
@@ -57,6 +63,9 @@ public class FolderManager {
 
         // Verify write access
         validateWritableDirectory(docDirPath);
+
+        // Run garbage collection after document creation
+        runGarbageCollection("[INFO] Garbage collection executed after creating document directory.");
 
         return docDirPath;
     }
@@ -73,6 +82,7 @@ public class FolderManager {
         String pageDirPath = documentDir + "/QrCodes/PageNo" + pageNo;
         Path pageDir = Path.of(pageDirPath);
 
+        // Create page directory if it doesn't exist
         if (!Files.exists(pageDir)) {
             Files.createDirectories(pageDir);
             System.out.println("[INFO] Page directory created for page " + pageNo + ": " + pageDirPath);
@@ -83,6 +93,9 @@ public class FolderManager {
 
         // Verify write access
         validateWritableDirectory(pageDirPath);
+
+        // Run garbage collection after page directory creation
+        runGarbageCollection("[INFO] Garbage collection executed after creating page directory.");
 
         return pageDirPath;
     }
@@ -140,5 +153,15 @@ public class FolderManager {
         if (!Files.isWritable(path)) {
             throw new IOException("[ERROR] Write permission denied for directory: " + dirPath);
         }
+    }
+
+    /**
+     * Runs garbage collection to optimize memory usage.
+     *
+     * @param message A log message to indicate when garbage collection is triggered.
+     */
+    private void runGarbageCollection(String message) {
+        System.gc(); // Explicitly request garbage collection
+        System.out.println(message);
     }
 }

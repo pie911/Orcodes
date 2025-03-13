@@ -22,50 +22,97 @@ public class SmartQRCodeGenerator {
 
     /**
      * Converts the updated PDF content into a responsive website with QR codes, extracted text, and headings.
+     * Converts the updated PDF content into a responsive website with QR codes, extracted text, and headings.
      */
-    public void convertPDFToWebsite(String pdfPath, HashMap<Integer, List<QRCodeDetails>> qrData,
-                                    String websiteOutputDir) throws IOException {
-        // Create website directory
-        String userWebsiteDir = folderManager.createUserDirectory(websiteOutputDir, "Website");
+    public void convertPDFToWebsite(String pdfPath, HashMap<Integer, List<QRCodeDetails>> qrData, String websiteOutputDir) throws IOException {
+        // Extract the base file name (without extension) for the website folder name
+        File pdfFile = new File(pdfPath);
+        String fileNameWithoutExtension = pdfFile.getName().replaceFirst("[.][^.]+$", "");
+        String userWebsiteDir = folderManager.createUserDirectory(websiteOutputDir, fileNameWithoutExtension);
 
         // Create subdirectories for QR codes and extracted images
         String qrCodesDir = folderManager.createDocumentDirectory(userWebsiteDir, "QrCodes");
         String imagesDir = folderManager.createDocumentDirectory(userWebsiteDir, "ExtractedImages");
 
         // Copy QR codes and images to the website directory
-        copyQrCodesToWebsite(qrData, qrCodesDir);
-        extractImagesFromPDF(pdfPath, imagesDir);
+        try {
+            copyQrCodesToWebsite(qrData, qrCodesDir);
+            System.gc(); // Trigger garbage collection after heavy operation
+            System.out.println("[INFO] Garbage collection triggered after copying QR codes.");
+        } catch (IOException e) {
+            throw new IOException("[ERROR] Failed to copy QR codes: " + e.getMessage());
+        }
 
-        // Create the main index.html file
+        try {
+            extractImagesFromPDF(pdfPath, imagesDir);
+            System.gc(); // Trigger garbage collection after heavy operation
+            System.out.println("[INFO] Garbage collection triggered after extracting images.");
+        } catch (IOException e) {
+            throw new IOException("[ERROR] Failed to extract images: " + e.getMessage());
+        }
+
+        // Generate index.html with an enhanced table format
         File indexFile = new File(userWebsiteDir, "index.html");
-        try (PrintWriter writer = new PrintWriter(indexFile);
-             PDDocument document = Loader.loadPDF(new File(pdfPath))) {
+        List<String> colorClasses = getColors(); // Retrieve the color classes
 
+        try (PrintWriter writer = new PrintWriter(indexFile)) {
             writer.println(generateHTMLHeader("QR Code Website"));
             writer.println("<body>");
             writer.println(generateNavbar("QR Code Website"));
             writer.println("<div class='container mt-4'>");
             writer.println("<h1 class='display-4 text-center mb-4'>QR Code Index</h1>");
 
-            // Generate index links
-            writer.println("<ul class='list-group'>");
-            for (int pageNo : qrData.keySet().stream().sorted().toList()) {
-                writer.println("<li class='list-group-item text-center'>");
-                writer.println("<a href='Page_" + pageNo + ".html' class='btn btn-primary'>Go to Page " + pageNo + "</a>");
-                writer.println("</li>");
+            // Create table structure with proper spacing and styling
+            writer.println("<table class='table table-bordered text-center table-hover'>");
+            writer.println("<thead class='table-dark'><tr><th>Page Number</th><th>Access Link</th></tr></thead>");
+            writer.println("<tbody>");
+
+            // Sorted pages in ascending order
+            List<Integer> sortedPages = qrData.keySet().stream().sorted().toList();
+            for (int i = 0; i < sortedPages.size(); i++) {
+                int pageNo = sortedPages.get(i);
+
+                // Alternate row colors using predefined styles
+                String colorClass = colorClasses.get(i % colorClasses.size());
+                writer.println("<tr class='" + colorClass + "'>");
+                writer.println("<td>Page " + pageNo + "</td>");
+                writer.println("<td><a href='Page_" + pageNo + ".html' class='btn btn-primary'>View Page</a></td>");
+                writer.println("</tr>");
             }
-            writer.println("</ul>");
+
+            writer.println("</tbody>");
+            writer.println("</table>");
             writer.println("</div>");
             writer.println("</body>");
             writer.println("</html>");
+        } catch (IOException e) {
+            throw new IOException("[ERROR] Failed to generate index.html: " + e.getMessage());
+        }
 
-            // Create individual page files
+        // Create individual HTML pages with navigation (Forward/Backward buttons)
+        try (PDDocument document = Loader.loadPDF(pdfFile)) {
             PDFTextStripper textStripper = new PDFTextStripper();
+
             for (var entry : qrData.entrySet()) {
-                createPageHTML(userWebsiteDir, document, textStripper, entry, entry.getKey());
+                int pageNo = entry.getKey();
+                int totalPages = qrData.size(); // Get the total number of pages
+
+                try {
+                    createPageHTML(userWebsiteDir, document, textStripper, entry, pageNo, totalPages);
+                    System.gc(); // Trigger garbage collection after processing each page
+                    System.out.println("[INFO] Garbage collection triggered after creating Page_" + pageNo + ".html");
+                } catch (IOException e) {
+                    System.err.println("[ERROR] Failed to create Page_" + pageNo + ": " + e.getMessage());
+                }
             }
+        } catch (IOException e) {
+            throw new IOException("[ERROR] Failed to load or process the PDF document: " + e.getMessage());
         }
     }
+
+
+
+
 
     private void copyQrCodesToWebsite(HashMap<Integer, List<QRCodeDetails>> qrData, String qrCodesDir) throws IOException {
         for (var entry : qrData.entrySet()) {
@@ -86,11 +133,20 @@ public class SmartQRCodeGenerator {
 
     /**
      * Helper method to create an individual page HTML file.
+     *
+     * @param userWebsiteDir The directory where the HTML file will be created.
+     * @param document       The PDF document from which content is extracted.
+     * @param textStripper   The PDFTextStripper used to extract text from the PDF.
+     * @param entry          The mapping of the page number to its QR code details.
+     * @param pageNo         The current page number being processed.
+     * @param totalPages     The total number of pages in the document.
+     * @throws IOException   If an error occurs during file creation or processing.
      */
     private void createPageHTML(String userWebsiteDir, PDDocument document, PDFTextStripper textStripper,
-                                Map.Entry<Integer, List<QRCodeDetails>> entry, int pageNo) throws IOException {
+                                Map.Entry<Integer, List<QRCodeDetails>> entry, int pageNo, int totalPages) throws IOException {
         File pageFile = new File(userWebsiteDir, "Page_" + pageNo + ".html");
         try (PrintWriter pageWriter = new PrintWriter(pageFile)) {
+            // Generate HTML header
             pageWriter.println(generateHTMLHeader("Page " + pageNo));
             pageWriter.println("<body>");
             pageWriter.println(generateNavbar("Page " + pageNo));
@@ -113,19 +169,38 @@ public class SmartQRCodeGenerator {
                 pageWriter.println("</div>");
             }
 
-            // Display QR codes
+            // Display QR codes in a card layout
             pageWriter.println("<div class='row mt-4'>");
             for (QRCodeDetails details : entry.getValue()) {
                 writeQRCard(pageWriter, details);
             }
             pageWriter.println("</div>");
 
+            // Add forward and backward navigation buttons
+            pageWriter.println("<div class='d-flex justify-content-between mt-4'>");
+            if (pageNo > 1) {
+                pageWriter.println("<a href='Page_" + (pageNo - 1) + ".html' class='btn btn-secondary'>Previous Page</a>");
+            } else {
+                pageWriter.println("<button class='btn btn-secondary' disabled>Previous Page</button>");
+            }
+            if (pageNo < totalPages) {
+                pageWriter.println("<a href='Page_" + (pageNo + 1) + ".html' class='btn btn-secondary'>Next Page</a>");
+            } else {
+                pageWriter.println("<button class='btn btn-secondary' disabled>Next Page</button>");
+            }
             pageWriter.println("</div>");
-            pageWriter.println("<a href='index.html' class='btn btn-secondary mt-3'>Back to Index</a>");
+
+            // Add "Back to Index" button
+            pageWriter.println("<div class='text-center mt-3'>");
+            pageWriter.println("<a href='index.html' class='btn btn-primary'>Back to Index</a>");
+            pageWriter.println("</div>");
+
+            pageWriter.println("</div>"); // Close container
             pageWriter.println("</body>");
             pageWriter.println("</html>");
         }
     }
+
 
     /**
      * Extracts all images from the PDF and saves them to the output directory.
@@ -190,4 +265,7 @@ public class SmartQRCodeGenerator {
         writer.println("</div>"); // Close column
     }
 
+    public List<String> getColors() {
+        return colors;
+    }
 }

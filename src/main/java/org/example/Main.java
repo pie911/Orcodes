@@ -61,7 +61,7 @@ public class Main {
             DocumentAnalyzer analyzer = new DocumentAnalyzer();
             HashMap<Integer, List<String>> pageLinks;
             try {
-                pageLinks = analyzer.analyzeDocument(documentPath, docDir); // Updated for compatibility
+                pageLinks = analyzer.analyzeDocument(documentPath, docDir);
             } catch (IOException e) {
                 tracker.logError("Error during document analysis: " + e.getMessage());
                 return;
@@ -91,11 +91,15 @@ public class Main {
                 return;
             }
 
+            // Trigger garbage collection after QR code generation
+            System.gc();
+            System.out.println("[INFO] Garbage collection executed after QR code generation.");
+
             // Step 5: Generate supplementary files
             tracker.updateProgress("Creating supplementary files...");
             FileGenerator fileGenerator = new FileGenerator();
             try {
-                fileGenerator.createQrCodesJson(qrData, docDir); // Ensured compatibility
+                fileGenerator.createQrCodesJson(qrData, docDir);
                 fileGenerator.createQrTableXlsx(qrData, docDir);
                 fileGenerator.createQrTablePdf(qrData, docDir);
             } catch (IOException e) {
@@ -103,9 +107,13 @@ public class Main {
                 return;
             }
 
+            // Trigger garbage collection after supplementary file creation
+            System.gc();
+            System.out.println("[INFO] Garbage collection executed after supplementary file generation.");
+
             // Step 6: Embed QR codes into PDF
             tracker.updateProgress("Embedding QR codes into PDF...");
-            PDFEditor pdfEditor = new PDFEditor(); // Ensure PDFEditor implementation exists
+            PDFEditor pdfEditor = new PDFEditor();
             try {
                 pdfEditor.embedQRCodes(documentPath, qrData, userDir + "/" + fileName + "_Final", tracker);
                 tracker.logMessage("QR codes successfully embedded into the PDF.");
@@ -113,6 +121,10 @@ public class Main {
                 tracker.logError("Failed to embed QR codes: " + e.getMessage());
                 return;
             }
+
+            // Trigger garbage collection after embedding QR codes
+            System.gc();
+            System.out.println("[INFO] Garbage collection executed after embedding QR codes into the PDF.");
 
             // Step 7: Generate responsive website
             tracker.updateProgress("Generating responsive website...");

@@ -51,7 +51,7 @@ public class Utils {
     }
 
     /**
-     * Sanitizes a file name by removing illegal characters.
+     * Sanitizes a file name by removing illegal characters and limiting its length.
      *
      * @param name The file name to sanitize.
      * @return A sanitized file name.
@@ -61,13 +61,9 @@ public class Utils {
             return "default_name";
         }
 
-        // Replace invalid characters with underscores and limit the length to 255 characters.
+        // Replace invalid characters with underscores and limit length to 255 characters
         String sanitized = name.replaceAll("[^a-zA-Z0-9-_.]", "_");
-        if (sanitized.length() > 255) {
-            sanitized = sanitized.substring(0, 255);
-        }
-
-        return sanitized;
+        return sanitized.length() > 255 ? sanitized.substring(0, 255) : sanitized;
     }
 
     /**
@@ -93,7 +89,7 @@ public class Utils {
      * @return A unique name based on the current timestamp.
      */
     public static String generateTimestampedName() {
-        return String.valueOf(System.currentTimeMillis());
+        return "file_" + System.currentTimeMillis();
     }
 
     /**
@@ -112,7 +108,7 @@ public class Utils {
 
         if (file.isDirectory()) {
             File[] subFiles = file.listFiles();
-            if (subFiles != null) { // Avoid NullPointerException
+            if (subFiles != null) {
                 for (File subFile : subFiles) {
                     if (!deleteFile(subFile.getPath())) {
                         System.err.println("[ERROR] Failed to delete: " + subFile.getPath());
@@ -181,13 +177,9 @@ public class Utils {
 
         if (directory.exists() && directory.isDirectory()) {
             File[] files = directory.listFiles();
-            if (files != null) { // Avoid NullPointerException
+            if (files != null) {
                 for (File file : files) {
-                    if (includeFullPaths) {
-                        contents.add(file.getAbsolutePath());
-                    } else {
-                        contents.add(file.getName());
-                    }
+                    contents.add(includeFullPaths ? file.getAbsolutePath() : file.getName());
                 }
             }
         } else {
@@ -218,5 +210,18 @@ public class Utils {
 
         Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
         System.out.println("[INFO] Moved " + sourcePath + " to " + destinationPath);
+    }
+
+    /**
+     * Checks if a directory is writable, throwing an exception if not.
+     *
+     * @param dirPath The directory path to check.
+     * @throws IOException If the directory is not writable.
+     */
+    public static void validateWritableDirectory(String dirPath) throws IOException {
+        Path path = Paths.get(dirPath);
+        if (!Files.isWritable(path)) {
+            throw new IOException("[ERROR] Directory is not writable: " + dirPath);
+        }
     }
 }

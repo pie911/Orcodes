@@ -101,49 +101,71 @@ public class PDFEditor {
      * @throws IOException   If an error occurs during QR code embedding.
      */
     private void embedQRDetailsOnPage(PDPage page, List<QRCodeDetails> qrDetailsList, ProgressTracker tracker) throws IOException {
-        float margin = 50;
-        float qrCodeSize = 100;
-        float horizontalSpacing = 20;
-        float verticalSpacing = 30;
+        float margin = 50; // Margins for the page
+        float qrCodeSize = 100; // Standard QR code size
+        float horizontalSpacing = 20; // Space between QR codes horizontally
+        float verticalSpacing = 30; // Space between QR codes vertically
         float pageWidth = page.getMediaBox().getWidth();
         float pageHeight = page.getMediaBox().getHeight();
 
-        float x = margin; // Start placing from the left margin
-        float y = pageHeight - margin; // Start placing from the top margin
+        float x = margin; // Initial x position for QR code placement
+        float y = pageHeight - margin; // Initial y position for QR code placement
 
+        // Create content stream for writing content to the page
         PDPageContentStream contentStream = new PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true);
 
         for (QRCodeDetails qrDetails : qrDetailsList) {
-            // Adjust position for QR codes dynamically
+            // Move to the next row if QR code exceeds the horizontal boundary
             if (x + qrCodeSize > pageWidth - margin) {
-                x = margin; // Reset X to the left margin
+                x = margin; // Reset x to the left margin
                 y -= qrCodeSize + verticalSpacing; // Move down to the next row
             }
 
-            if (y - qrCodeSize < margin) { // Not enough space
-                tracker.logWarning("[WARNING] Insufficient space on the page for more QR codes.");
-                break;
+            // If y-position is below the bottom margin, create a new page
+            if (y - qrCodeSize < margin) {
+                tracker.logMessage("[INFO] Adding a new page due to insufficient space.");
+                contentStream.close(); // Close the current content stream
+
+                // Create a new page and reset positions
+                page = new PDPage(document.getPage(0).getMediaBox());
+                document.addPage(page);
+                contentStream = new PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true);
+                x = margin;
+                y = pageHeight - margin;
             }
 
-            // Embed QR code
-            String qrFilePath = qrDetails.getQrFilePath();
-            PDImageXObject qrImage = PDImageXObject.createFromFile(qrFilePath, document);
+            // Draw a border (box) around the QR code
+            contentStream.setLineWidth(0.5f); // Border thickness
+            contentStream.addRect(x, y - qrCodeSize, qrCodeSize, qrCodeSize); // Define the box dimensions
+            contentStream.stroke(); // Render the box
+
+            // Embed the QR code image inside the box
+            PDImageXObject qrImage = PDImageXObject.createFromFile(qrDetails.getQrFilePath(), document);
             contentStream.drawImage(qrImage, x, y - qrCodeSize, qrCodeSize, qrCodeSize);
 
-            // Add text label below the QR code
-            String pageName = extractAndTruncatePageName(qrDetails.getLink());
-            PDType0Font font = loadFont();
+            // Add a label below the QR code with the slug or page name
+            String slugName = extractAndTruncateSlug(qrDetails.getLink());
+            PDType0Font font = loadFont(); // Load font once for text display
             contentStream.beginText();
             contentStream.setFont(font, 10);
             contentStream.newLineAtOffset(x + 5, y - qrCodeSize - 15);
-            contentStream.showText("Page: " + pageName);
+            contentStream.showText("Page: " + slugName);
             contentStream.endText();
 
-            x += qrCodeSize + horizontalSpacing; // Move to the next position horizontally
+            // Move to the next QR code position horizontally
+            x += qrCodeSize + horizontalSpacing;
         }
 
-        contentStream.close();
-        tracker.logMessage("[INFO] QR codes embedded successfully on the page.");
+        contentStream.close(); // Close the content stream when done
+    }
+
+
+    private String extractAndTruncateSlug(String url) {
+        if (url == null || url.isEmpty()) return "Unknown";
+
+        String[] parts = url.split("/");
+        String slug = parts[parts.length - 1];
+        return slug.length() > 7 ? slug.substring(0, 7) : slug;
     }
 
 
@@ -157,28 +179,27 @@ public class PDFEditor {
     private void appendQrTablePages(TreeMap<Integer, List<QRCodeDetails>> qrData, ProgressTracker tracker) throws IOException {
         float margin = 50;
         float tableWidth = PDRectangle.A4.getWidth() - 2 * margin;
-        float cellWidth = tableWidth / 3; // 3 columns
-        float cellHeight = 120; // Each row height
+        float cellWidth = tableWidth / 3;
+        float cellHeight = 120;
         float yStart = PDRectangle.A4.getHeight() - margin;
 
         PDPage page = new PDPage(PDRectangle.A4);
         document.addPage(page);
         PDPageContentStream contentStream = new PDPageContentStream(document, page);
 
-        float x = margin; // Start at left margin
-        float y = yStart; // Start at top margin
+        float x = margin;
+        float y = yStart;
         int columnCount = 0;
 
         for (var entry : qrData.entrySet()) {
-            int pageNo = entry.getKey();
             for (QRCodeDetails qrDetails : entry.getValue()) {
-                if (columnCount == 3) { // Move to the next row after 3 columns
+                if (columnCount == 3) {
                     columnCount = 0;
                     x = margin;
                     y -= cellHeight;
                 }
 
-                if (y - cellHeight < margin) { // Add new page if out of space
+                if (y - cellHeight < margin) {
                     contentStream.close();
                     page = new PDPage(PDRectangle.A4);
                     document.addPage(page);
@@ -186,17 +207,17 @@ public class PDFEditor {
                     y = yStart;
                 }
 
-                // Draw cell borders
+                // Draw cell and QR code details
                 contentStream.setLineWidth(0.5f);
                 contentStream.addRect(x, y - cellHeight, cellWidth, cellHeight);
                 contentStream.stroke();
 
-                // Add page number and QR code label
+                String slugName = extractAndTruncateSlug(qrDetails.getLink());
                 PDType0Font font = loadFont();
                 contentStream.beginText();
                 contentStream.setFont(font, 10);
                 contentStream.newLineAtOffset(x + 5, y - 20);
-                contentStream.showText("Page: " + pageNo);
+                contentStream.showText("Page: " + slugName);
                 contentStream.endText();
 
                 x += cellWidth;
@@ -207,6 +228,7 @@ public class PDFEditor {
         contentStream.close();
         tracker.logMessage("[INFO] QR Code Table pages appended successfully.");
     }
+
 
 
     /**
@@ -257,14 +279,23 @@ public class PDFEditor {
      * @param tracker      The progress tracker for logging progress.
      * @throws IOException If any error occurs during the process.
      */
+    /**
+     * Embeds QR codes into the original PDF and appends QR Code Table pages at the end.
+     *
+     * @param documentPath  The path to the original PDF file.
+     * @param qrData        A mapping of page numbers to QR code details.
+     * @param outputPath    The path to save the final PDF with QR codes embedded.
+     * @param tracker       The progress tracker for logging progress.
+     * @throws IOException  If any error occurs during the process.
+     */
     public void embedQRCodes(String documentPath, HashMap<Integer, List<QRCodeDetails>> qrData, String outputPath, ProgressTracker tracker) throws IOException {
         tracker.logMessage("[INFO] Starting QR code embedding process...");
 
-        // Load the PDF document
+        // Step 1: Load the PDF document
         loadPDF(documentPath);
 
         try {
-            // Step 1: Embed QR codes on specified pages
+            // Step 2: Embed QR codes on specified pages
             for (var entry : qrData.entrySet()) {
                 int pageNo = entry.getKey();
                 List<QRCodeDetails> qrCodeDetailsList = entry.getValue();
@@ -279,11 +310,14 @@ public class PDFEditor {
                 embedQRDetailsOnPage(page, qrCodeDetailsList, tracker);
             }
 
-            // Step 2: Append QR Code Table pages at the end
+            // Step 3: Append QR Code Table pages to the end
             tracker.logMessage("[INFO] Appending QR Code Table pages...");
             appendQrTablePages(new TreeMap<>(qrData), tracker);
 
-            // Step 3: Save the updated document
+            // Step 4: Ensure the final PDF is saved with the `.pdf` extension
+            if (!outputPath.endsWith(".pdf")) {
+                outputPath += ".pdf";
+            }
             savePDF(outputPath);
             tracker.logMessage("[INFO] QR code embedding process completed successfully. File saved at: " + outputPath);
 
@@ -292,8 +326,9 @@ public class PDFEditor {
             throw e;
 
         } finally {
-            // Ensure the document is closed to release resources
+            // Step 5: Ensure the document is closed to release resources
             closePDF();
         }
     }
+
 }

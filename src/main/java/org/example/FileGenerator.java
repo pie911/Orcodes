@@ -99,9 +99,10 @@ public class FileGenerator {
             float yStart = PDRectangle.A4.getHeight() - margin;
             float xStart = margin;
 
+            // Load the font from resources
             InputStream fontStream = getClass().getClassLoader().getResourceAsStream("fonts/times.ttf");
             if (fontStream == null) {
-                throw new IOException("Font file 'fonts/times.ttf' not found in resources.");
+                throw new IOException("Font file 'times.ttf' not found in resources.");
             }
             PDType0Font font = PDType0Font.load(pdfDocument, fontStream);
 
@@ -151,12 +152,12 @@ public class FileGenerator {
                     contentStream.showText("Page No: " + pageNo);
                     contentStream.endText();
 
-                    // Add shortened link (max 5 characters)
-                    String shortLink = shortenUrl(details.getLink());
+                    // Add final page slug as the link name
+                    String slugName = extractAndTruncateSlug(details.getLink());
                     contentStream.beginText();
                     contentStream.setFont(font, 10);
                     contentStream.newLineAtOffset(xPosition + 5, yPosition - 35);
-                    contentStream.showText("Link: " + shortLink);
+                    contentStream.showText("Link: " + slugName);
                     contentStream.endText();
 
                     // Move to the next column
@@ -169,11 +170,32 @@ public class FileGenerator {
             }
 
             contentStream.close();
+
+            // Ensure the PDF file is saved with the correct extension
             File pdfFile = new File(outputPath, Utils.sanitizeFileName("QrTable.pdf"));
+            if (!pdfFile.getName().endsWith(".pdf")) {
+                pdfFile = new File(pdfFile.getAbsolutePath() + ".pdf");
+            }
+
             pdfDocument.save(pdfFile);
             System.out.println("[INFO] PDF file created successfully at: " + pdfFile.getAbsolutePath());
         }
     }
+
+    /**
+     * Extracts the final portion of the URL (slug) and truncates it to 7 characters.
+     *
+     * @param url The full URL link.
+     * @return The extracted and truncated page slug.
+     */
+    private String extractAndTruncateSlug(String url) {
+        if (url == null || url.isEmpty()) return "Unknown";
+
+        String[] parts = url.split("/");
+        String slug = parts[parts.length - 1];
+        return slug.length() > 7 ? slug.substring(0, 7) : slug;
+    }
+
 
     /**
      * Validates whether the QR code file exists and is readable.
