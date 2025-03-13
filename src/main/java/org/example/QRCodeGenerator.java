@@ -1,11 +1,5 @@
 package org.example;
 
-import com.google.zxing.BarcodeFormat;
-import com.google.zxing.WriterException;
-import com.google.zxing.client.j2se.MatrixToImageWriter;
-import com.google.zxing.common.BitMatrix;
-import com.google.zxing.qrcode.QRCodeWriter;
-
 import java.io.IOException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -13,9 +7,19 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.WriterException;
+import com.google.zxing.client.j2se.MatrixToImageWriter;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.qrcode.QRCodeWriter;
+
 public class QRCodeGenerator {
+    private static final String PNG_FORMAT = "PNG";
+    private static final String PAGE_PREFIX = "Page_";
+    private static final QRCodeWriter qrCodeWriter = new QRCodeWriter();
 
     /**
      * Generates QR codes for each unique link extracted from the document and saves them in appropriate folders.
@@ -38,41 +42,44 @@ public class QRCodeGenerator {
             List<String> links = entry.getValue();
 
             // Ensure each page has its own directory for QR codes
-            String pageDir = baseDir + "/Page_" + pageNo;
+            String pageDir = baseDir + "/" + PAGE_PREFIX + pageNo;
             createDirectory(pageDir);
 
             System.out.println("Generating QR codes for page " + pageNo + "...");
-            for (String link : links) {
-                if (!processedLinks.add(link)) { // Skip duplicate links
-                    System.out.println("[INFO] Duplicate link detected, skipping: " + link);
-                    continue;
-                }
+            
+            List<QRCodeDetails> pageDetails = links.stream()
+                .filter(processedLinks::add) // Returns true if link was added (not duplicate)
+                .map(link -> generateQRCodeForLink(link, pageDir, pageNo, width, height))
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .toList();
 
-                // Sanitize the link to generate a valid QR code file name
-                String qrFileName = Utils.sanitizeFileName(link) + ".png";
-                String qrFilePath = pageDir + "/" + qrFileName;
-
-                // Generate the QR code and save it to the specified path
-                try {
-                    generateQRCodeImage(link, width, height, qrFilePath);
-                    System.out.println("[INFO] QR code generated and saved at: " + qrFilePath);
-                } catch (WriterException e) {
-                    System.err.println("[ERROR] Error generating QR code for link: " + link + " - " + e.getMessage());
-                    continue; // Skip this link and proceed with the next one
-                } catch (IOException e) {
-                    System.err.println("[ERROR] Error saving QR code for link: " + link + " - " + e.getMessage());
-                    continue; // Skip this link and proceed with the next one
-                }
-
-                // Save details of the generated QR code
-                QRCodeDetails qrCodeDetails = new QRCodeDetails(pageNo, link, qrFilePath, "");
-                qrCodeDetails.setText(link); // Optionally set text for display in other files
-                qrCodeDetailsMap.computeIfAbsent(pageNo, k -> new java.util.ArrayList<>()).add(qrCodeDetails);
+            if (!pageDetails.isEmpty()) {
+                qrCodeDetailsMap.put(pageNo, pageDetails);
             }
         }
 
         System.out.println("[INFO] QR code generation completed.");
         return qrCodeDetailsMap;
+    }
+
+    private Optional<QRCodeDetails> generateQRCodeForLink(String link, String pageDir, int pageNo, int width, int height) {
+        try {
+            String qrFileName = Utils.sanitizeFileName(link) + ".png";
+            String qrFilePath = pageDir + "/" + qrFileName;
+
+            generateQRCodeImage(link, width, height, qrFilePath);
+            System.out.println("[INFO] QR code generated and saved at: " + qrFilePath);
+
+            QRCodeDetails details = new QRCodeDetails(pageNo, link, qrFilePath, link);
+            return Optional.of(details);
+
+        } catch (WriterException e) {
+            System.err.println("[ERROR] Error generating QR code for link: " + link + " - " + e.getMessage());
+        } catch (IOException e) {
+            System.err.println("[ERROR] Error saving QR code for link: " + link + " - " + e.getMessage());
+        }
+        return Optional.empty();
     }
 
     /**
@@ -86,8 +93,6 @@ public class QRCodeGenerator {
      * @throws IOException     If an error occurs while saving the QR code image.
      */
     private void generateQRCodeImage(String text, int width, int height, String filePath) throws WriterException, IOException {
-        QRCodeWriter qrCodeWriter = new QRCodeWriter();
-
         // Create parent directories if they don't exist
         Path parentPath = FileSystems.getDefault().getPath(filePath).getParent();
         createDirectory(parentPath.toString());
@@ -97,7 +102,7 @@ public class QRCodeGenerator {
 
         // Save the QR code image as a PNG file
         Path outputPath = FileSystems.getDefault().getPath(filePath);
-        MatrixToImageWriter.writeToPath(bitMatrix, "PNG", outputPath);
+        MatrixToImageWriter.writeToPath(bitMatrix, PNG_FORMAT, outputPath);
     }
 
     /**

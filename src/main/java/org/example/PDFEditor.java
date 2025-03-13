@@ -166,14 +166,40 @@ public class PDFEditor implements AutoCloseable {
                     // Add a new page and reset starting positions
                     page = new PDPage(document.getPage(0).getMediaBox());
                     document.addPage(page);
-                    contentStream.close();
+                    
+                    // Create new content stream for the new page
                     try (PDPageContentStream newContentStream = new PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true)) {
                         x = margin;
                         y = pageHeight - margin;
 
-                        // Continue processing the QR codes with a new content stream
-                        continue;
+                        // Add page header with generated name
+                        String pageName = extractAndTruncatePageName("QR_Codes_Page_" + document.getNumberOfPages());
+                        newContentStream.beginText();
+                        newContentStream.setFont(loadFont(), 12);
+                        newContentStream.newLineAtOffset(margin, pageHeight - margin/2);
+                        newContentStream.showText(pageName);
+                        newContentStream.endText();
+
+                        // Draw QR code on new page
+                        PDImageXObject qrImage = PDImageXObject.createFromFile(qrDetails.getQrFilePath(), document);
+                        newContentStream.drawImage(qrImage, x, y - qrCodeSize, qrCodeSize, qrCodeSize);
+
+                        // Add border around QR code
+                        newContentStream.setLineWidth(0.5f);
+                        newContentStream.addRect(x, y - qrCodeSize, qrCodeSize, qrCodeSize);
+                        newContentStream.stroke();
+
+                        // Add label
+                        String slugName = extractAndTruncateSlug(qrDetails.getLink());
+                        newContentStream.beginText();
+                        newContentStream.setFont(loadFont(), 10);
+                        newContentStream.newLineAtOffset(x + 5, y - qrCodeSize - 15);
+                        newContentStream.showText("Page: " + slugName);
+                        newContentStream.endText();
                     }
+                    
+                    // Update position for next QR code
+                    x += qrCodeSize + horizontalSpacing;
                 }
 
                 // Draw a border (box) around the QR code
@@ -231,11 +257,11 @@ public class PDFEditor implements AutoCloseable {
      * @throws IOException If an error occurs during table appending.
      */
     private void appendQrTablePages(TreeMap<Integer, List<QRCodeDetails>> qrData, ProgressTracker tracker) throws IOException {
-        // Margins and dimensions remain the same
+        // Margins and dimensions
         float margin = 50;
         float tableWidth = PDRectangle.A4.getWidth() - 2 * margin;
         float cellWidth = tableWidth / 3;
-        float cellHeight = 120;
+        float cellHeight = 150; // Increased height for better visibility
         float yStart = PDRectangle.A4.getHeight() - margin;
 
         PDPage page = new PDPage(PDRectangle.A4);
@@ -246,9 +272,17 @@ public class PDFEditor implements AutoCloseable {
         float y = yStart;
         int columnCount = 0;
         int processedItems = 0;
-        int totalItems = qrData.values().stream().mapToInt(List::size).sum();
 
         try {
+            // Add title to the first page
+            PDType0Font font = loadFont();
+            contentStream.beginText();
+            contentStream.setFont(font, 16);
+            contentStream.newLineAtOffset(margin, yStart + 20);
+            contentStream.showText("QR Codes Index");
+            contentStream.endText();
+            y -= 50; // Move down after title
+
             for (var entry : qrData.entrySet()) {
                 for (QRCodeDetails qrDetails : entry.getValue()) {
                     if (columnCount == 3) {
@@ -265,33 +299,41 @@ public class PDFEditor implements AutoCloseable {
                         y = yStart;
                     }
 
-                    // Draw cell and content
-                    contentStream.setLineWidth(0.5f);
+                    // Draw cell with improved styling
+                    contentStream.setLineWidth(1.0f);
                     contentStream.addRect(x, y - cellHeight, cellWidth, cellHeight);
                     contentStream.stroke();
 
+                    // Add page number at the top of the cell
+                    contentStream.beginText();
+                    contentStream.setFont(font, 12);
+                    contentStream.newLineAtOffset(x + 5, y - 20);
+                    contentStream.showText("Page " + qrDetails.getPageNo());
+                    contentStream.endText();
+
+                    // Draw QR code
                     PDImageXObject qrImage = PDImageXObject.createFromFile(qrDetails.getQrFilePath(), document);
-                    float qrCodeSize = Math.min(cellWidth - 20, cellHeight - 40);
+                    float qrCodeSize = Math.min(cellWidth - 20, cellHeight - 60);
                     float qrX = x + (cellWidth - qrCodeSize) / 2;
-                    float qrY = y - cellHeight + 10;
+                    float qrY = y - cellHeight + 30;
                     contentStream.drawImage(qrImage, qrX, qrY, qrCodeSize, qrCodeSize);
 
+                    // Add URL slug below QR code
                     String slugName = extractAndTruncateSlug(qrDetails.getLink());
-                    PDType0Font font = loadFont();
                     contentStream.beginText();
                     contentStream.setFont(font, 10);
-                    contentStream.newLineAtOffset(x + 5, y - cellHeight + 5);
-                    contentStream.showText("Page: " + slugName);
+                    contentStream.newLineAtOffset(x + 5, y - cellHeight + 10);
+                    contentStream.showText(slugName);
                     contentStream.endText();
 
                     x += cellWidth;
                     columnCount++;
                     processedItems++;
 
-                    // Trigger GC only after processing a significant number of items
-                    if (processedItems % 50 == 0) {
-                        System.gc();
-                        tracker.logMessage("[INFO] Memory cleanup performed after processing " + processedItems + " of " + totalItems + " items");
+                    // Perform GC only after processing many items
+                    if (processedItems % 100 == 0) {
+                        Runtime.getRuntime().gc();
+                        tracker.logMessage("[INFO] Memory cleaned after processing " + processedItems + " items");
                     }
                 }
             }
@@ -308,12 +350,23 @@ public class PDFEditor implements AutoCloseable {
      * @param url The full URL to extract from.
      * @return The extracted and truncated page name.
      */
-    private String extractAndTruncatePageName(String url) {
-        if (url == null || url.isEmpty()) return "Unknown";
+    private String extractAndTruncatePageName(String text) {
+        if (text == null || text.isEmpty()) return "Unknown";
 
-        String[] parts = url.split("/");
-        String pageName = parts[parts.length - 1];
-        return pageName.length() > 7 ? pageName.substring(0, 7) : pageName;
+        // If it's a URL, extract the last part
+        if (text.contains("/")) {
+            String[] parts = text.split("/");
+            text = parts[parts.length - 1];
+        }
+
+        // Remove file extension if present
+        if (text.contains(".")) {
+            text = text.substring(0, text.lastIndexOf('.'));
+        }
+
+        // Truncate and clean the text
+        text = text.replaceAll("[^a-zA-Z0-9_-]", "");
+        return text.length() > 15 ? text.substring(0, 15) + "..." : text;
     }
 
     private PDType0Font cachedFont; // Caches the font instance
@@ -368,42 +421,72 @@ public class PDFEditor implements AutoCloseable {
         try {
             loadPDF(documentPath);
             
-            // Step 2: Embed QR codes on specified pages
-            for (var entry : qrData.entrySet()) {
-                int pageNo = entry.getKey();
-                List<QRCodeDetails> qrCodeDetailsList = entry.getValue();
+            // Extract document name for headers
+            String documentName = extractAndTruncatePageName(documentPath);
+            tracker.logMessage("[INFO] Processing document: " + documentName);
 
-                if (pageNo < 1 || pageNo > document.getNumberOfPages()) {
-                    tracker.logWarning("[WARNING] Page number " + pageNo + " is out of range. Skipping...");
-                    continue;
-                }
+            // Create new pages for QR codes
+            tracker.logMessage("[INFO] Creating QR code pages...");
+            TreeMap<Integer, List<QRCodeDetails>> sortedQrData = new TreeMap<>(qrData);
+            
+            // Add document info page
+            addDocumentInfoPage(documentName, sortedQrData.size(), tracker);
+            
+            // Add QR code pages
+            appendQrTablePages(sortedQrData, tracker);
 
-                PDPage page = document.getPage(pageNo - 1);
-                tracker.logMessage("[INFO] Embedding QR codes on page " + pageNo + "...");
-                embedQRDetailsOnPage(page, qrCodeDetailsList, tracker);
-            }
-
-            // Step 3: Append QR Code Table pages
-            tracker.logMessage("[INFO] Appending QR Code Table pages...");
-            appendQrTablePages(new TreeMap<>(qrData), tracker);
-
-            // Step 4: Save the final PDF
+            // Save the final PDF
             if (!outputPath.endsWith(".pdf")) {
                 outputPath += ".pdf";
             }
 
             savePDF(outputPath);
-            tracker.logMessage("[INFO] QR code embedding process completed successfully. File saved at: " + outputPath);
+            tracker.logMessage("[INFO] QR code process completed successfully. File saved at: " + outputPath);
 
         } catch (IOException e) {
-            tracker.logError("[ERROR] Failed to embed QR codes: " + e.getMessage());
+            tracker.logError("[ERROR] Failed to process QR codes: " + e.getMessage());
             throw e;
         } finally {
-            // Cleanup resources
             closePDF();
-            System.gc(); // Single garbage collection at the end
+            Runtime.getRuntime().gc();
             tracker.logMessage("[INFO] Resources cleaned up successfully.");
         }
+    }
+
+    // Add new helper method for document info page
+    private void addDocumentInfoPage(String documentName, int totalQRCodes, ProgressTracker tracker) throws IOException {
+        PDPage infoPage = new PDPage(PDRectangle.A4);
+        document.addPage(infoPage);
+        
+        try (PDPageContentStream contentStream = new PDPageContentStream(document, infoPage)) {
+            PDType0Font font = loadFont();
+            float margin = 50;
+            float yStart = PDRectangle.A4.getHeight() - margin;
+            
+            // Add title
+            contentStream.beginText();
+            contentStream.setFont(font, 16);
+            contentStream.newLineAtOffset(margin, yStart);
+            contentStream.showText("QR Code Index for: " + documentName);
+            contentStream.endText();
+            
+            // Add summary info
+            contentStream.beginText();
+            contentStream.setFont(font, 12);
+            contentStream.newLineAtOffset(margin, yStart - 30);
+            contentStream.showText("Total QR Codes: " + totalQRCodes);
+            contentStream.endText();
+            
+            // Add timestamp
+            contentStream.beginText();
+            contentStream.setFont(font, 10);
+            contentStream.newLineAtOffset(margin, yStart - 50);
+            contentStream.showText("Generated on: " + java.time.LocalDateTime.now().format(
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+            contentStream.endText();
+        }
+        
+        tracker.logMessage("[INFO] Added document info page");
     }
 
     @Override

@@ -1,12 +1,44 @@
 package org.example;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 public class Utils {
+    private static final int BUFFER_SIZE = 8192; // 8KB buffer size for file operations
+    private static final ConcurrentHashMap<String, Long> operationTimings = new ConcurrentHashMap<>();
+    private static final AtomicInteger operationCount = new AtomicInteger(0);
+    private static final int GC_THRESHOLD = 100;
+
+    /**
+     * Validates both source and destination paths.
+     *
+     * @param sourcePath The source path to validate
+     * @param destinationPath The destination path to validate
+     * @throws IOException If either path is invalid
+     */
+    private static void validatePaths(String sourcePath, String destinationPath) throws IOException {
+        if (sourcePath == null || sourcePath.trim().isEmpty()) {
+            throw new IOException("[ERROR] Source path cannot be null or empty");
+        }
+        if (destinationPath == null || destinationPath.trim().isEmpty()) {
+            throw new IOException("[ERROR] Destination path cannot be null or empty");
+        }
+    }
 
     /**
      * Validates if a directory path exists and is accessible.
@@ -20,11 +52,11 @@ public class Utils {
             return false;
         }
 
-        File directory = new File(directoryPath);
-        if (directory.exists() && directory.isDirectory()) {
-            return true;
-        } else {
-            System.err.println("[ERROR] Invalid directory: " + directoryPath);
+        try {
+            Path path = Paths.get(directoryPath);
+            return Files.isDirectory(path) && Files.isReadable(path);
+        } catch (SecurityException | InvalidPathException e) {
+            System.err.println("[ERROR] Invalid directory access: " + e.getMessage());
             return false;
         }
     }
@@ -41,11 +73,11 @@ public class Utils {
             return false;
         }
 
-        File file = new File(filePath);
-        if (file.exists() && file.canRead()) {
-            return true;
-        } else {
-            System.err.println("[ERROR] Invalid or unreadable file: " + filePath);
+        try {
+            Path path = Paths.get(filePath);
+            return Files.isRegularFile(path) && Files.isReadable(path);
+        } catch (SecurityException | InvalidPathException e) {
+            System.err.println("[ERROR] Invalid file access: " + e.getMessage());
             return false;
         }
     }
@@ -73,13 +105,21 @@ public class Utils {
      * @param taskName The name of the task for logging.
      */
     public static void measureExecutionTime(Runnable task, String taskName) {
-        long startTime = System.currentTimeMillis();
+        long startTime = System.nanoTime();
         try {
             task.run();
-            long duration = System.currentTimeMillis() - startTime;
-            System.out.println("[INFO] " + taskName + " completed successfully in " + duration + " ms.");
+            long duration = (System.nanoTime() - startTime) / 1_000_000; // Convert to milliseconds
+            operationTimings.put(taskName, duration);
+            
+            if (operationCount.incrementAndGet() >= GC_THRESHOLD) {
+                System.gc();
+                operationCount.set(0);
+            }
+            
+            System.out.printf("[INFO] %s completed in %d ms%n", taskName, duration);
         } catch (Exception e) {
-            System.err.println("[ERROR] " + taskName + " failed: " + e.getMessage());
+            System.err.printf("[ERROR] %s failed: %s%n", taskName, e.getMessage());
+            throw new RuntimeException(e);
         }
     }
 
@@ -141,74 +181,100 @@ public class Utils {
     }
 
     /**
-     * Copies a file from the source path to the destination path.
+     * Copies a file from the source path to the destination path using buffered streams.
      *
      * @param sourcePath      The source file path.
      * @param destinationPath The destination file path.
      * @throws IOException If the source file does not exist or cannot be copied.
      */
     public static void copyFile(String sourcePath, String destinationPath) throws IOException {
-        if (sourcePath == null || sourcePath.trim().isEmpty() ||
-                destinationPath == null || destinationPath.trim().isEmpty()) {
-            throw new IllegalArgumentException("Source or destination path cannot be null or empty.");
+        validatePaths(sourcePath, destinationPath);
+
+        File sourceFile = new File(sourcePath);
+        File destFile = new File(destinationPath);
+
+        // Create parent directories if they don't exist
+        if (destFile.getParentFile() != null) {
+            Files.createDirectories(destFile.getParentFile().toPath());
         }
 
-        Path source = Paths.get(sourcePath);
-        Path destination = Paths.get(destinationPath);
-
-        if (!Files.exists(source)) {
-            throw new IOException("Source file does not exist: " + sourcePath);
+        // Use buffered streams for better performance
+        try (BufferedInputStream bis = new BufferedInputStream(new FileInputStream(sourceFile), BUFFER_SIZE);
+             BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(destFile), BUFFER_SIZE)) {
+            
+            byte[] buffer = new byte[BUFFER_SIZE];
+            int bytesRead;
+            long totalBytes = 0;
+            
+            while ((bytesRead = bis.read(buffer)) != -1) {
+                bos.write(buffer, 0, bytesRead);
+                totalBytes += bytesRead;
+            }
+            
+            // Ensure all bytes are written
+            bos.flush();
+            
+            System.out.printf("[INFO] Copied %s to %s (%d bytes)%n", 
+                sourcePath, destinationPath, totalBytes);
+            
+            // Copy file attributes
+            Files.copy(sourceFile.toPath(), destFile.toPath(), 
+                StandardCopyOption.COPY_ATTRIBUTES);
         }
-
-        Files.copy(source, destination, StandardCopyOption.REPLACE_EXISTING);
-        System.out.println("[INFO] " + sourcePath + " copied to " + destinationPath);
     }
 
     /**
-     * Lists the contents of a directory.
+     * Lists the contents of a directory using buffered operations.
      *
      * @param directoryPath   The directory to list contents from.
      * @param includeFullPaths If true, returns full paths; otherwise, returns only file names.
      * @return A list of directory contents.
      */
     public static List<String> listDirectoryContents(String directoryPath, boolean includeFullPaths) {
-        List<String> contents = new ArrayList<>();
-        File directory = new File(directoryPath);
-
-        if (directory.exists() && directory.isDirectory()) {
-            File[] files = directory.listFiles();
-            if (files != null) {
-                for (File file : files) {
-                    contents.add(includeFullPaths ? file.getAbsolutePath() : file.getName());
-                }
-            }
-        } else {
-            System.err.println("[ERROR] Invalid directory: " + directoryPath);
+        List<String> results = new ArrayList<>();
+        try {
+            Path dir = Paths.get(directoryPath);
+            return Files.walk(dir, 1)
+                .skip(1)
+                .map(path -> includeFullPaths ? path.toString() : path.getFileName().toString())
+                .sorted()
+                .collect(Collectors.toList());
+        } catch (IOException e) {
+            System.err.println("[ERROR] Failed to list directory contents: " + e.getMessage());
+            return results;
         }
-        return contents;
     }
 
     /**
-     * Moves a file from the source path to the destination path.
+     * Moves a file from the source path to the destination path using buffered operations.
      *
      * @param sourcePath      The source file path.
      * @param destinationPath The destination file path.
      * @throws IOException If the source file does not exist or cannot be moved.
      */
     public static void moveFile(String sourcePath, String destinationPath) throws IOException {
-        if (sourcePath == null || destinationPath == null ||
-                sourcePath.trim().isEmpty() || destinationPath.trim().isEmpty()) {
-            throw new IllegalArgumentException("Source or destination path cannot be null or empty.");
-        }
+        validatePaths(sourcePath, destinationPath);
 
-        Path source = Paths.get(sourcePath);
-        Path destination = Paths.get(destinationPath);
+        File sourceFile = new File(sourcePath);
+        File destFile = new File(destinationPath);
 
-        if (!Files.exists(source)) {
+        if (!sourceFile.exists()) {
             throw new IOException("Source file does not exist: " + sourcePath);
         }
 
-        Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
+        // First try atomic move
+        try {
+            Files.move(sourceFile.toPath(), destFile.toPath(), 
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException e) {
+            // If atomic move is not supported, fall back to copy and delete
+            copyFile(sourcePath, destinationPath);
+            if (!deleteFile(sourcePath)) {
+                throw new IOException("Failed to delete source file after copy: " + sourcePath);
+            }
+        }
+
         System.out.println("[INFO] Moved " + sourcePath + " to " + destinationPath);
     }
 
@@ -222,6 +288,17 @@ public class Utils {
         Path path = Paths.get(dirPath);
         if (!Files.isWritable(path)) {
             throw new IOException("[ERROR] Directory is not writable: " + dirPath);
+        }
+    }
+
+    /**
+     * Cleans up resources and performs garbage collection if needed
+     */
+    public static void cleanup() {
+        operationTimings.clear();
+        if (operationCount.get() > 0) {
+            System.gc();
+            operationCount.set(0);
         }
     }
 }

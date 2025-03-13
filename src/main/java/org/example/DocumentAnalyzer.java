@@ -1,27 +1,65 @@
 package org.example;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType0Font;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
 import org.apache.pdfbox.text.PDFTextStripper;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 public class DocumentAnalyzer {
 
     private final FolderManager folderManager = new FolderManager(); // For folder operations
-
-    // Regex to identify visible links in text
     private static final Pattern LINK_PATTERN = Pattern.compile("\\bhttps?://[\\w\\-._~:/?#@!$&'()*+,;=%]+\\b");
+    private static final int BATCH_SIZE = 50; // Process pages in batches
+    private PDType0Font cachedFont; // Cache font for reuse
+    private PDType0Font cachedBoldFont;
+    private static final String FONT_PATH = "/fonts/times.ttf";
+    private static final String FONT_BOLD_PATH = "/fonts/timesbd.ttf";
+
+    // Add font loading method
+    private PDType0Font getFont(PDDocument document, boolean bold) throws IOException {
+        if (bold) {
+            if (cachedBoldFont == null) {
+                try (InputStream fontStream = getClass().getResourceAsStream(FONT_BOLD_PATH)) {
+                    if (fontStream == null) {
+                        throw new IOException("[ERROR] Bold font file not found: " + FONT_BOLD_PATH);
+                    }
+                    cachedBoldFont = PDType0Font.load(document, fontStream);
+                    System.out.println("[INFO] Times Bold font loaded successfully");
+                }
+            }
+            return cachedBoldFont;
+        } else {
+            if (cachedFont == null) {
+                try (InputStream fontStream = getClass().getResourceAsStream(FONT_PATH)) {
+                    if (fontStream == null) {
+                        throw new IOException("[ERROR] Font file not found: " + FONT_PATH);
+                    }
+                    cachedFont = PDType0Font.load(document, fontStream);
+                    System.out.println("[INFO] Times Regular font loaded successfully");
+                }
+            }
+            return cachedFont;
+        }
+    }
 
     /**
      * Analyze the PDF document to extract both visible and embedded links.
@@ -33,44 +71,58 @@ public class DocumentAnalyzer {
      */
     public HashMap<Integer, List<String>> analyzeDocument(String documentPath, String outputDir) throws IOException {
         HashMap<Integer, List<String>> pageLinks = new HashMap<>();
+        int processedPages = 0;
 
-        // Validate the PDF file
-        File pdfFile = new File(documentPath);
-        if (!pdfFile.exists() || !pdfFile.canRead()) {
-            throw new IOException("PDF file does not exist or cannot be read: " + documentPath);
-        }
-
-        // Create the output directory for storing analysis files
+        // Validate inputs
+        File pdfFile = validateInputs(documentPath);
         String analysisDir = folderManager.createDocumentDirectory(outputDir, "Analysis");
 
         try (PDDocument document = Loader.loadPDF(pdfFile)) {
             int totalPages = document.getNumberOfPages();
+            System.out.println("[INFO] Starting analysis of " + totalPages + " pages...");
 
-            // Process each page
+            // Process each page with batch handling
             for (int pageNum = 0; pageNum < totalPages; pageNum++) {
                 PDPage page = document.getPage(pageNum);
                 Set<String> links = new LinkedHashSet<>(); // Avoid duplicates while preserving order
 
-                System.out.println("Processing page " + (pageNum + 1) + "...");
+                System.out.println("[INFO] Processing page " + (pageNum + 1) + " of " + totalPages);
 
-                // Extract visible links from text
+                // Extract links
                 links.addAll(extractVisibleLinks(document, pageNum + 1));
-
-                // Extract embedded links from annotations
                 links.addAll(extractEmbeddedLinks(page));
 
-                // Save the links if not empty
+                // Save links if found
                 if (!links.isEmpty()) {
                     pageLinks.put(pageNum + 1, new ArrayList<>(links));
-                    System.out.println("Links extracted for page " + (pageNum + 1));
+                    saveLinksToFile(pageLinks, analysisDir, pageNum + 1);
                 }
 
-                // Optional: Save extracted links to a file for each page
-                saveLinksToFile(pageLinks, analysisDir, pageNum + 1);
+                // Batch processing cleanup
+                processedPages++;
+                if (processedPages % BATCH_SIZE == 0) {
+                    System.gc();
+                    System.out.println("[INFO] Memory cleaned after processing " + processedPages + " pages");
+                }
             }
+
+            System.out.println("[INFO] Document analysis completed. Found links in " + pageLinks.size() + " pages.");
         }
 
         return pageLinks;
+    }
+
+    private File validateInputs(String documentPath) throws IOException {
+        if (documentPath == null || documentPath.trim().isEmpty()) {
+            throw new IOException("[ERROR] Document path cannot be null or empty");
+        }
+
+        File pdfFile = new File(documentPath);
+        if (!pdfFile.exists() || !pdfFile.canRead()) {
+            throw new IOException("[ERROR] PDF file does not exist or cannot be read: " + documentPath);
+        }
+
+        return pdfFile;
     }
 
     /**
@@ -86,14 +138,19 @@ public class DocumentAnalyzer {
         pdfStripper.setStartPage(pageNum);
         pdfStripper.setEndPage(pageNum);
 
-        String pageText = pdfStripper.getText(document);
+        // Use StringBuilder for better memory efficiency
+        StringBuilder textBuilder = new StringBuilder();
+        textBuilder.append(pdfStripper.getText(document));
+
         List<String> links = new ArrayList<>();
-        Matcher matcher = LINK_PATTERN.matcher(pageText);
+        Matcher matcher = LINK_PATTERN.matcher(textBuilder);
 
         while (matcher.find()) {
             links.add(matcher.group());
         }
 
+        // Help GC by clearing the StringBuilder
+        textBuilder.setLength(0);
         return links;
     }
 
@@ -106,23 +163,25 @@ public class DocumentAnalyzer {
      */
     private List<String> extractEmbeddedLinks(PDPage page) throws IOException {
         List<String> embeddedLinks = new ArrayList<>();
-
         List<PDAnnotation> annotations = page.getAnnotations();
+
         for (PDAnnotation annotation : annotations) {
             if (annotation instanceof PDAnnotationLink linkAnnotation) {
-                COSBase action = linkAnnotation.getCOSObject().getDictionaryObject("A"); // Get the action dictionary
-                if (action instanceof COSDictionary actionDict) {
-                    String uri = actionDict.getString("URI");
-                    if (uri != null && !uri.isBlank()) { // Ensure the URI is valid
-                        embeddedLinks.add(uri);
-                    } else {
-                        System.err.println("Invalid or missing URI in link annotation.");
-                    }
-                }
+                processLinkAnnotation(linkAnnotation, embeddedLinks);
             }
         }
 
         return embeddedLinks;
+    }
+
+    private void processLinkAnnotation(PDAnnotationLink linkAnnotation, List<String> embeddedLinks) {
+        COSBase action = linkAnnotation.getCOSObject().getDictionaryObject("A");
+        if (action instanceof COSDictionary actionDict) {
+            String uri = actionDict.getString("URI");
+            if (uri != null && !uri.isBlank()) {
+                embeddedLinks.add(uri);
+            }
+        }
     }
 
     /**
@@ -138,9 +197,62 @@ public class DocumentAnalyzer {
         File outputFile = new File(outputDir, sanitizedPageName + "_links.txt");
 
         List<String> links = pageLinks.get(pageNum);
-        if (links != null) {
-            Files.write(outputFile.toPath(), links);
-            System.out.println("Saved links for page " + pageNum + ": " + outputFile.getAbsolutePath());
+        if (links != null && !links.isEmpty()) {
+            // Create a PDF summary with formatted links
+            File pdfSummary = new File(outputDir, sanitizedPageName + "_links.pdf");
+            try (PDDocument document = new PDDocument()) {
+                PDPage page = new PDPage();
+                document.addPage(page);
+
+                try (PDPageContentStream contentStream = new PDPageContentStream(document, page)) {
+                    float margin = 50;
+                    float yStart = page.getMediaBox().getHeight() - margin;
+                    float titleFontSize = 14;
+                    float textFontSize = 12;
+                    
+                    // Use bold font for title
+                    PDType0Font boldFont = getFont(document, true);
+                    PDType0Font regularFont = getFont(document, false);
+                    
+                    // Add title with bold font
+                    contentStream.beginText();
+                    contentStream.setFont(boldFont, titleFontSize);
+                    contentStream.newLineAtOffset(margin, yStart);
+                    contentStream.showText("Links found on page " + pageNum);
+                    contentStream.endText();
+                    
+                    // Add links with regular font
+                    float y = yStart - 25;
+                    contentStream.setFont(regularFont, textFontSize);
+                    
+                    for (String link : links) {
+                        if (y < margin) {
+                            // Create new page if needed
+                            contentStream.close();
+                            page = new PDPage();
+                            document.addPage(page);
+                            contentStream.setFont(regularFont, textFontSize);
+                            y = yStart;
+                        }
+                        
+                        contentStream.beginText();
+                        contentStream.newLineAtOffset(margin, y);
+                        contentStream.showText(link);
+                        contentStream.endText();
+                        y -= textFontSize + 5;
+                    }
+                }
+                document.save(pdfSummary);
+            }
+
+            // Also save as text file for backup
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) {
+                for (String link : links) {
+                    writer.write(link);
+                    writer.newLine();
+                }
+            }
+            System.out.println("[INFO] Saved " + links.size() + " links for page " + pageNum + " in both PDF and TXT format");
         }
     }
 }

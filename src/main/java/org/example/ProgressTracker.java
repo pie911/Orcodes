@@ -1,16 +1,29 @@
 package org.example;
 
-import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.text.DecimalFormat;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 
-public class ProgressTracker {
-
-    private long startTime; // Tracks the start time of the process
-    private final AtomicInteger totalSteps = new AtomicInteger(0); // Total steps in the process
-    private final AtomicInteger completedSteps = new AtomicInteger(0); // Completed steps count
-    private boolean isTracking = false; // Tracks whether the process has started
+public class ProgressTracker implements AutoCloseable {
+    private static final int LOG_BUFFER_SIZE = 8192;
+    private static final String LOG_FILE = "application.log";
+    private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DecimalFormat PROGRESS_FORMAT = new DecimalFormat("0.00");
+    
+    private final ReentrantLock lock = new ReentrantLock();
+    private long startTime;
+    private final AtomicInteger totalSteps = new AtomicInteger(0);
+    private final AtomicInteger completedSteps = new AtomicInteger(0);
+    private volatile boolean isTracking = false;
+    private final StringBuilder logBuffer = new StringBuilder(LOG_BUFFER_SIZE);
+    private int bufferCount = 0;
 
     /**
      * Starts tracking the progress of a task.
@@ -47,19 +60,17 @@ public class ProgressTracker {
         }
 
         int currentStep = completedSteps.incrementAndGet();
-
         if (currentStep > totalSteps.get()) {
             logError("Current step exceeds total steps.");
             return;
         }
 
-        // Calculate progress percentage
         double percentage = ((double) currentStep / totalSteps.get()) * 100;
-        DecimalFormat df = new DecimalFormat("0.00");
-
-        // Display the progress update
-        logMessage("Step " + currentStep + "/" + totalSteps.get() + " Completed (" + df.format(percentage) + "%)");
-        logMessage("Task: " + description);
+        logMessage(String.format("Step %d/%d Completed (%s%%) - %s", 
+            currentStep, 
+            totalSteps.get(), 
+            PROGRESS_FORMAT.format(percentage),
+            description));
     }
 
     /**
@@ -123,8 +134,7 @@ public class ProgressTracker {
         }
 
         double percentage = ((double) completedSteps.get() / totalSteps.get()) * 100;
-        DecimalFormat df = new DecimalFormat("0.00");
-        return df.format(percentage) + "%";
+        return PROGRESS_FORMAT.format(percentage) + "%";
     }
 
     /**
@@ -152,8 +162,24 @@ public class ProgressTracker {
      *
      * @param message The message to log.
      */
-    public synchronized void logMessage(String message) {
-        System.out.println("[INFO] " + message);
+    public void logMessage(String message) {
+        lock.lock();
+        try {
+            String formattedMessage = String.format("[%s][INFO] %s%n", 
+                LocalDateTime.now().format(DATE_FORMAT), 
+                message);
+            
+            System.out.print(formattedMessage);
+            
+            logBuffer.append(formattedMessage);
+            bufferCount++;
+            
+            if (bufferCount >= 10) { // Flush after 10 messages
+                flushLogBuffer();
+            }
+        } finally {
+            lock.unlock();
+        }
     }
 
     /**
@@ -161,8 +187,20 @@ public class ProgressTracker {
      *
      * @param errorMessage The error message to log.
      */
-    public synchronized void logError(String errorMessage) {
-        System.err.println("[ERROR] " + errorMessage);
+    public void logError(String errorMessage) {
+        lock.lock();
+        try {
+            String formattedMessage = String.format("[%s][ERROR] %s%n", 
+                LocalDateTime.now().format(DATE_FORMAT), 
+                errorMessage);
+            
+            System.err.print(formattedMessage);
+            
+            logBuffer.append(formattedMessage);
+            flushLogBuffer(); // Always flush errors immediately
+        } finally {
+            lock.unlock();
+        }
     }
 
     /**
@@ -171,18 +209,66 @@ public class ProgressTracker {
      * @param message The warning message to log.
      */
     public void logWarning(String message) {
-        if (message == null || message.trim().isEmpty()) {
-            message = "An unspecified warning was triggered.";
-        }
+        lock.lock();
+        try {
+            if (message == null || message.trim().isEmpty()) {
+                message = "An unspecified warning was triggered.";
+            }
 
-        String formattedMessage = "[WARNING] " + message;
-        System.out.println(formattedMessage);
-
-        // Save the warning to a log file
-        try (FileWriter writer = new FileWriter("application.log", true)) {
-            writer.write(formattedMessage + "\n");
-        } catch (IOException e) {
-            System.err.println("[ERROR] Failed to write warning to log file: " + e.getMessage());
+            String formattedMessage = String.format("[%s][WARNING] %s%n", 
+                LocalDateTime.now().format(DATE_FORMAT), 
+                message);
+            
+            System.out.print(formattedMessage);
+            
+            logBuffer.append(formattedMessage);
+            bufferCount++;
+            
+            if (bufferCount >= 5) { // Flush more frequently for warnings
+                flushLogBuffer();
+            }
+        } finally {
+            lock.unlock();
         }
+    }
+
+    private void flushLogBuffer() {
+        if (logBuffer.length() > 0) {
+            try {
+                Path logPath = Paths.get(LOG_FILE);
+                if (!Files.exists(logPath)) {
+                    Files.createFile(logPath);
+                }
+                
+                Files.write(
+                    logPath, 
+                    logBuffer.toString().getBytes(),
+                    StandardOpenOption.CREATE, 
+                    StandardOpenOption.APPEND
+                );
+                logBuffer.setLength(0);
+                bufferCount = 0;
+            } catch (IOException e) {
+                System.err.println("[ERROR] Failed to flush log buffer: " + e.getMessage());
+            }
+        }
+    }
+
+    @Override
+    public void close() {
+        lock.lock();
+        try {
+            flushLogBuffer();
+            if (isTracking) {
+                completeTracking();
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    // Method to ensure resource cleanup
+    public void cleanupResources() {
+        close();
     }
 }
