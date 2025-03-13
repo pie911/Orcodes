@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Scanner;
 
 public class Main {
-
     public static void main(String[] args) {
         ProgressTracker tracker = new ProgressTracker();
 
@@ -40,32 +39,19 @@ public class Main {
             }
 
             // Initialize progress tracking
-            tracker.startTracking(7); // Define 7 steps
+            tracker.startTracking(7);
             System.out.println("\nProcess started with 7 steps.\n");
 
             // Step 1: Create directories
             tracker.updateProgress("Creating project directories...");
             FolderManager folderManager = new FolderManager();
-            String userDir;
-            String docDir;
-            try {
-                userDir = folderManager.createUserDirectory(basePath, userName);
-                docDir = folderManager.createDocumentDirectory(userDir, fileName);
-            } catch (IOException e) {
-                tracker.logError("Failed to create directories: " + e.getMessage());
-                return;
-            }
+            String userDir = folderManager.createUserDirectory(basePath, userName);
+            String docDir = folderManager.createDocumentDirectory(userDir, fileName);
 
             // Step 2: Analyze the document for links
             tracker.updateProgress("Analyzing document for links...");
             DocumentAnalyzer analyzer = new DocumentAnalyzer();
-            HashMap<Integer, List<String>> pageLinks;
-            try {
-                pageLinks = analyzer.analyzeDocument(documentPath, docDir);
-            } catch (IOException e) {
-                tracker.logError("Error during document analysis: " + e.getMessage());
-                return;
-            }
+            HashMap<Integer, List<String>> pageLinks = analyzer.analyzeDocument(documentPath, docDir);
 
             if (pageLinks.isEmpty()) {
                 tracker.logMessage("No links found. Process completed.");
@@ -83,64 +69,38 @@ public class Main {
             // Step 4: Generate QR codes
             tracker.updateProgress("Generating QR codes...");
             QRCodeGenerator qrGenerator = new QRCodeGenerator();
-            HashMap<Integer, List<QRCodeDetails>> qrData;
-            try {
-                qrData = qrGenerator.generateQRCodes(pageLinks, docDir, qrWidth, qrHeight);
-            } catch (IOException e) {
-                tracker.logError("Failed to generate QR codes: " + e.getMessage());
-                return;
-            }
-
-            // Trigger garbage collection after QR code generation
-            System.gc();
-            System.out.println("[INFO] Garbage collection executed after QR code generation.");
+            HashMap<Integer, List<QRCodeDetails>> qrData = qrGenerator.generateQRCodes(pageLinks, docDir, qrWidth, qrHeight);
 
             // Step 5: Generate supplementary files
             tracker.updateProgress("Creating supplementary files...");
             FileGenerator fileGenerator = new FileGenerator();
-            try {
-                fileGenerator.createQrCodesJson(qrData, docDir);
-                fileGenerator.createQrTableXlsx(qrData, docDir);
-                fileGenerator.createQrTablePdf(qrData, docDir);
-            } catch (IOException e) {
-                tracker.logError("Failed to generate supplementary files: " + e.getMessage());
-                return;
-            }
-
-            // Trigger garbage collection after supplementary file creation
-            System.gc();
-            System.out.println("[INFO] Garbage collection executed after supplementary file generation.");
+            fileGenerator.createQrCodesJson(qrData, docDir);
+            fileGenerator.createQrTableXlsx(qrData, docDir);
+            fileGenerator.createQrTablePdf(qrData, docDir);
 
             // Step 6: Embed QR codes into PDF
             tracker.updateProgress("Embedding QR codes into PDF...");
-            PDFEditor pdfEditor = new PDFEditor();
-            try {
+            try (PDFEditor pdfEditor = new PDFEditor()) { // Use try-with-resources
                 pdfEditor.embedQRCodes(documentPath, qrData, userDir + "/" + fileName + "_Final", tracker);
                 tracker.logMessage("QR codes successfully embedded into the PDF.");
-            } catch (IOException e) {
-                tracker.logError("Failed to embed QR codes: " + e.getMessage());
-                return;
             }
-
-            // Trigger garbage collection after embedding QR codes
-            System.gc();
-            System.out.println("[INFO] Garbage collection executed after embedding QR codes into the PDF.");
 
             // Step 7: Generate responsive website
             tracker.updateProgress("Generating responsive website...");
             SmartQRCodeGenerator smartQrGenerator = new SmartQRCodeGenerator();
-            try {
-                smartQrGenerator.convertPDFToWebsite(documentPath, qrData, userDir + "/Website");
-                tracker.logMessage("Responsive website generated successfully.");
-            } catch (IOException e) {
-                tracker.logError("Failed to generate website: " + e.getMessage());
-            }
+            smartQrGenerator.convertPDFToWebsite(documentPath, qrData, userDir + "/Website");
+            tracker.logMessage("Responsive website generated successfully.");
 
             // Finalize process
             tracker.updateProgress("Finalizing output...");
             tracker.completeTracking();
             tracker.logMessage("Process completed successfully! Files saved in: " + userDir);
 
+            // Single garbage collection at the end
+            System.gc();
+
+        } catch (IOException e) {
+            tracker.logError("Process failed: " + e.getMessage());
         } catch (NumberFormatException e) {
             System.err.println("Invalid numeric input. Ensure you enter valid numbers.");
         }
