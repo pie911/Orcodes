@@ -11,6 +11,8 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 
 public class SmartQRCodeGenerator {
@@ -30,6 +32,10 @@ public class SmartQRCodeGenerator {
         String qrCodesDir = folderManager.createDocumentDirectory(userWebsiteDir, "QrCodes");
         String imagesDir = folderManager.createDocumentDirectory(userWebsiteDir, "ExtractedImages");
 
+        // Copy QR codes and images to the website directory
+        copyQrCodesToWebsite(qrData, qrCodesDir);
+        extractImagesFromPDF(pdfPath, imagesDir);
+
         // Create the main index.html file
         File indexFile = new File(userWebsiteDir, "index.html");
         try (PrintWriter writer = new PrintWriter(indexFile);
@@ -41,54 +47,42 @@ public class SmartQRCodeGenerator {
             writer.println("<div class='container mt-4'>");
             writer.println("<h1 class='display-4 text-center mb-4'>QR Code Index</h1>");
 
-            // Create a table layout for page navigation
-            writer.println("<table class='table table-bordered table-striped text-center'>");
-            writer.println("<thead class='table-dark'><tr>");
-            writer.println("<th>Page No</th><th>Page No</th><th>Page No</th><th>Page No</th><th>Page No</th>");
-            writer.println("</tr></thead>");
-            writer.println("<tbody>");
-
-            // Sort page numbers in ascending order
-            List<Integer> sortedPageNumbers = new ArrayList<>(qrData.keySet());
-            Collections.sort(sortedPageNumbers);
-
-            int columnCounter = 0;
-            for (int i = 0; i < sortedPageNumbers.size(); i++) {
-                // Start a new row every 5 columns
-                if (columnCounter == 0) {
-                    writer.println("<tr>");
-                }
-
-                // Assign a unique color from the list in a repeating pattern
-                String colorClass = colors.get(i % colors.size());
-                int pageNo = sortedPageNumbers.get(i);
-                writer.println("<td class='" + colorClass + "'><a class='text-white' href='Page_" + pageNo + ".html'>Page " + pageNo + "</a></td>");
-
-                columnCounter++;
-                if (columnCounter == 5) { // End the row after 5 columns
-                    writer.println("</tr>");
-                    columnCounter = 0;
-                }
+            // Generate index links
+            writer.println("<ul class='list-group'>");
+            for (int pageNo : qrData.keySet().stream().sorted().toList()) {
+                writer.println("<li class='list-group-item text-center'>");
+                writer.println("<a href='Page_" + pageNo + ".html' class='btn btn-primary'>Go to Page " + pageNo + "</a>");
+                writer.println("</li>");
             }
-
-            // Close the last row if it's incomplete
-            if (columnCounter != 0) {
-                writer.println("</tr>");
-            }
-
-            writer.println("</tbody>");
-            writer.println("</table>");
+            writer.println("</ul>");
             writer.println("</div>");
             writer.println("</body>");
             writer.println("</html>");
 
-            // Generate individual page files
+            // Create individual page files
             PDFTextStripper textStripper = new PDFTextStripper();
             for (var entry : qrData.entrySet()) {
                 createPageHTML(userWebsiteDir, document, textStripper, entry, entry.getKey());
             }
         }
     }
+
+    private void copyQrCodesToWebsite(HashMap<Integer, List<QRCodeDetails>> qrData, String qrCodesDir) throws IOException {
+        for (var entry : qrData.entrySet()) {
+            for (QRCodeDetails details : entry.getValue()) {
+                File sourceFile = new File(details.getQrFilePath());
+                File destFile = new File(qrCodesDir, sourceFile.getName());
+
+                // Copy the file
+                Files.copy(sourceFile.toPath(), destFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                System.out.println("[INFO] Copied QR code: " + sourceFile.getAbsolutePath() + " to " + destFile.getAbsolutePath());
+
+                // Update QRCodeDetails path to the relative one in the website directory
+                details.setQrFilePath("./QrCodes/" + sourceFile.getName());
+            }
+        }
+    }
+
 
     /**
      * Helper method to create an individual page HTML file.
@@ -137,19 +131,18 @@ public class SmartQRCodeGenerator {
      * Extracts all images from the PDF and saves them to the output directory.
      */
     public void extractImagesFromPDF(String pdfPath, String extractedImagesDir) throws IOException {
-        String imagesDir = folderManager.createDocumentDirectory(extractedImagesDir, "ExtractedImages");
-
         try (PDDocument document = Loader.loadPDF(new File(pdfPath))) {
             PDFRenderer renderer = new PDFRenderer(document);
             for (int pageIndex = 0; pageIndex < document.getNumberOfPages(); pageIndex++) {
                 BufferedImage image = renderer.renderImageWithDPI(pageIndex, 300, ImageType.RGB);
                 String imageName = "Page_" + (pageIndex + 1) + ".png";
-                File outputImageFile = new File(imagesDir, imageName);
+                File outputImageFile = new File(extractedImagesDir, imageName);
                 ImageIO.write(image, "PNG", outputImageFile);
-                System.out.println("[INFO] Extracted image saved at: " + outputImageFile.getAbsolutePath());
+                System.out.println("[INFO] Extracted image saved: " + outputImageFile.getAbsolutePath());
             }
         }
     }
+
 
     /**
      * Helper method to generate an HTML header.
@@ -182,14 +175,19 @@ public class SmartQRCodeGenerator {
      */
     private void writeQRCard(PrintWriter writer, QRCodeDetails details) {
         writer.println("<div class='col-md-4 mb-4'>");
-        writer.println("<div class='card shadow-lg'>");
-        writer.println("<img src='./QrCodes/" + details.getQrFilePath() + "' class='card-img-top' alt='QR Code'>");
-        writer.println("<div class='card-body'>");
-        writer.println("<h5 class='card-title'>" + details.getText() + "</h5>");
-        writer.println("<a href='" + details.getLink() + "' class='btn btn-primary'>");
-        writer.println("<i class='bi bi-arrow-right-circle'></i> Visit Link</a>");
+        writer.println("<div class='card shadow-sm' style='height: 100%;'>");
+        writer.println("<div class='card-body text-center'>");
+
+        // Add QR code image with responsive styling
+        writer.println("<img src='" + details.getQrFilePath() + "' class='img-fluid rounded' alt='QR Code' style='max-height: 150px; max-width: 150px;'>");
+
+        // Add QR code details
+        writer.println("<h5 class='card-title mt-2'>" + details.getText() + "</h5>");
+        writer.println("<a href='" + details.getLink() + "' class='btn btn-primary mt-2'>Visit Link</a>");
+
         writer.println("</div>"); // Close card-body
         writer.println("</div>"); // Close card
         writer.println("</div>"); // Close column
     }
+
 }

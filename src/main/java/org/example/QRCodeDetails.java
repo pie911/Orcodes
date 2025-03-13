@@ -14,7 +14,7 @@ public class QRCodeDetails implements Serializable {
     private final int pageNo; // The page number where the QR code is placed
     private final String link; // The link encoded in the QR code
     private String text; // The associated text or description (mutable for dynamic updates)
-    private final String qrFilePath; // The file path to the saved QR code image
+    private String qrFilePath; // The file path to the saved QR code image
 
     /**
      * Constructor for QRCodeDetails.
@@ -84,4 +84,25 @@ public class QRCodeDetails implements Serializable {
     public int hashCode() {
         return Objects.hash(pageNo, link, qrFilePath);
     }
+
+    /**
+     * Sets the file path for the QR code image.
+     *
+     * @param filePath The new file path to set for the QR code image.
+     * @throws IllegalArgumentException If the file path is null, empty, or invalid.
+     */
+    public void setQrFilePath(String filePath) {
+        if (filePath == null || filePath.trim().isEmpty()) {
+            throw new IllegalArgumentException("[ERROR] QR code file path cannot be null or empty.");
+        }
+
+        // Validate that the file path ends with an image extension (.png, .jpg, etc.)
+        if (!(filePath.endsWith(".png") || filePath.endsWith(".jpg") || filePath.endsWith(".jpeg"))) {
+            throw new IllegalArgumentException("[ERROR] QR code file path must point to a valid image file (.png, .jpg, .jpeg).");
+        }
+
+        this.qrFilePath = filePath;
+        System.out.println("[INFO] QR code file path updated successfully: " + filePath);
+    }
+
 }
