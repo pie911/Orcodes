@@ -1,5 +1,7 @@
 package org.example;
 
+import java.io.FileWriter;
+import java.io.IOException;
 import java.text.DecimalFormat;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -161,5 +163,26 @@ public class ProgressTracker {
      */
     public synchronized void logError(String errorMessage) {
         System.err.println("[ERROR] " + errorMessage);
+    }
+
+    /**
+     * Logs a warning message and writes it to a log file.
+     *
+     * @param message The warning message to log.
+     */
+    public void logWarning(String message) {
+        if (message == null || message.trim().isEmpty()) {
+            message = "An unspecified warning was triggered.";
+        }
+
+        String formattedMessage = "[WARNING] " + message;
+        System.out.println(formattedMessage);
+
+        // Save the warning to a log file
+        try (FileWriter writer = new FileWriter("application.log", true)) {
+            writer.write(formattedMessage + "\n");
+        } catch (IOException e) {
+            System.err.println("[ERROR] Failed to write warning to log file: " + e.getMessage());
+        }
     }
 }
