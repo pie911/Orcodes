@@ -22,6 +22,7 @@ public class SmartQRCodeGenerator {
 
     private final FolderManager folderManager = new FolderManager();
     private final List<String> colors = Arrays.asList("bg-primary", "bg-success", "bg-info", "bg-warning", "bg-danger");
+    private static final int DPI = 300;
 
     public void convertPDFToWebsite(String pdfPath, HashMap<Integer, List<QRCodeDetails>> qrData, String websiteOutputDir) throws IOException {
         File pdfFile = new File(pdfPath);

@@ -2,12 +2,17 @@ package org.example;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class FolderManager {
+    // Add counter for directory operations
+    private final AtomicInteger directoryOperations = new AtomicInteger(0);
+    private static final int GC_THRESHOLD = 50; // Trigger GC after 50 directory operations
 
     /**
      * Creates the main user directory at the specified base path with proper permissions.
@@ -34,8 +39,8 @@ public class FolderManager {
         // Verify write access
         validateWritableDirectory(userDirPath);
 
-        // Run garbage collection after folder creation to release temporary resources
-        runGarbageCollection("[INFO] Garbage collection executed after creating user directory.");
+        // Improved garbage collection management
+        checkAndRunGC("User directory creation");
 
         return userDirPath;
     }
@@ -64,8 +69,8 @@ public class FolderManager {
         // Verify write access
         validateWritableDirectory(docDirPath);
 
-        // Run garbage collection after document creation
-        runGarbageCollection("[INFO] Garbage collection executed after creating document directory.");
+        // Improved garbage collection management
+        checkAndRunGC("Document directory creation");
 
         return docDirPath;
     }
@@ -94,8 +99,8 @@ public class FolderManager {
         // Verify write access
         validateWritableDirectory(pageDirPath);
 
-        // Run garbage collection after page directory creation
-        runGarbageCollection("[INFO] Garbage collection executed after creating page directory.");
+        // Improved garbage collection management
+        checkAndRunGC("Page directory creation");
 
         return pageDirPath;
     }
@@ -121,25 +126,48 @@ public class FolderManager {
      */
     private void setDirectoryPermissions(Path path) throws IOException {
         String osName = System.getProperty("os.name").toLowerCase();
-
-        if (osName.contains("win")) {
-            // Windows: Verify if the directory is writable
-            System.out.println("[INFO] Skipping POSIX permissions. Running on Windows.");
-            if (!Files.isWritable(path)) {
-                throw new IOException("[ERROR] Directory is not writable: " + path);
+        
+        try {
+            if (osName.contains("win")) {
+                setWindowsPermissions(path);
+            } else if (osName.contains("linux") || osName.contains("mac")) {
+                setPosixPermissions(path);
             }
-        } else if (osName.contains("linux") || osName.contains("mac")) {
-            try {
-                // Apply POSIX permissions for UNIX-like systems
-                Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rwxrwxrwx");
-                Files.setPosixFilePermissions(path, permissions);
-                System.out.println("[INFO] POSIX permissions applied: " + path);
-            } catch (UnsupportedOperationException e) {
-                System.out.println("[WARN] POSIX permissions not supported on this file system: " + path);
-            }
-        } else {
-            System.out.println("[INFO] Unknown OS. Ensuring directory is accessible: " + path);
+        } catch (SecurityException e) {
+            System.out.println("[WARN] Security restrictions prevent setting permissions: " + e.getMessage());
+            validateBasicWriteAccess(path);
+        } catch (UnsupportedOperationException e) {
+            System.out.println("[WARN] File system does not support permission changes: " + e.getMessage());
+            validateBasicWriteAccess(path);
+        } catch (IOException e) {
+            System.out.println("[ERROR] Failed to set permissions: " + e.getMessage());
+            throw new IOException("Permission setting failed for: " + path, e);
         }
+    }
+
+    private void setWindowsPermissions(Path path) throws IOException {
+        File file = path.toFile();
+        boolean success = file.setWritable(true, false) &&
+                         file.setReadable(true, false) &&
+                         file.setExecutable(true, false);
+        
+        if (!success) {
+            throw new IOException("[ERROR] Failed to set Windows permissions for: " + path);
+        }
+        System.out.println("[INFO] Windows permissions applied: " + path);
+    }
+
+    private void setPosixPermissions(Path path) throws IOException {
+        Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rwxrwxr--");
+        Files.setPosixFilePermissions(path, permissions);
+        System.out.println("[INFO] POSIX permissions applied: " + path);
+    }
+
+    private void validateBasicWriteAccess(Path path) throws IOException {
+        if (!Files.isWritable(path)) {
+            throw new IOException("[ERROR] Basic write access check failed for: " + path);
+        }
+        System.out.println("[INFO] Basic write access verified for: " + path);
     }
 
     /**
@@ -156,12 +184,16 @@ public class FolderManager {
     }
 
     /**
-     * Runs garbage collection to optimize memory usage.
+     * Improved garbage collection management.
      *
-     * @param message A log message to indicate when garbage collection is triggered.
+     * @param operation The operation after which garbage collection is checked.
      */
-    private void runGarbageCollection(String message) {
-        System.gc(); // Explicitly request garbage collection
-        System.out.println(message);
+    private void checkAndRunGC(String operation) {
+        int operations = directoryOperations.incrementAndGet();
+        if (operations >= GC_THRESHOLD) {
+            System.gc();
+            System.out.println("[INFO] Garbage collection triggered after " + GC_THRESHOLD + " " + operation + " operations");
+            directoryOperations.set(0);
+        }
     }
 }

@@ -123,6 +123,17 @@
             </executions>
         </plugin>
     </plugins>
+    <resources>
+        <resource>
+            <directory>src/main/resources</directory>
+            <includes>
+                <include>fonts/times.ttf</include>
+                <include>fonts/timesbd.ttf</include>
+                <include>fonts/timesbi.ttf</include>
+                <include>fonts/timesi.ttf</include>
+            </includes>
+        </resource>
+    </resources>
 </build>
 
 
